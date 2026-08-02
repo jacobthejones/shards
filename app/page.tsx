@@ -64,6 +64,37 @@ const playTone = (sim: Simulation, frequency: number, duration = 0.16, volume = 
   oscillator.stop(now + duration + 0.03);
 };
 
+type HarmonicPartial = {
+  ratio: number;
+  gain: number;
+};
+
+const playHarmonicTone = (
+  sim: Simulation,
+  frequency: number,
+  duration: number,
+  volume: number,
+  partials: HarmonicPartial[],
+) => {
+  const audio = sim.audio;
+  if (!sim.audioEnabled || !audio) return;
+  const now = audio.context.currentTime;
+  partials.forEach(({ ratio, gain: partialGain }) => {
+    const oscillator = audio.context.createOscillator();
+    const gain = audio.context.createGain();
+    oscillator.type = "sine";
+    oscillator.frequency.setValueAtTime(frequency * ratio, now);
+    oscillator.frequency.exponentialRampToValueAtTime(frequency * ratio * 1.06, now + duration);
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.exponentialRampToValueAtTime(Math.max(0.0001, volume * AUDIO_GAIN * partialGain), now + 0.006);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+    oscillator.connect(gain);
+    gain.connect(audio.context.destination);
+    oscillator.start(now);
+    oscillator.stop(now + duration + 0.03);
+  });
+};
+
 const ensureAudio = async (sim: Simulation) => {
   if (!sim.audio) {
     const AudioContextClass = window.AudioContext ||
@@ -510,8 +541,26 @@ export default function Home() {
     };
 
     const handleEvents = (events: SimulationEvent[]) => {
+      const propagationSounds = new Map<string, {
+        voice: "resonance" | "conduction";
+        frequency: number;
+        volume: number;
+      }>();
       events.forEach((event) => {
         if (event.type === "collision") {
+          if (event.voice) {
+            const sourceKey = event.sourceShardKey ?? event.shardKey;
+            const sourceShard = sim.shards.get(sourceKey) ?? sim.shards.get(event.shardKey);
+            const key = `${event.voice}:${sourceKey}`;
+            if (!propagationSounds.has(key)) {
+              propagationSounds.set(key, {
+                voice: event.voice,
+                frequency: sourceShard ? shardCollisionFrequency(sourceShard) : 411,
+                volume: event.volume ?? 0.5,
+              });
+            }
+            return;
+          }
           const shard = sim.shards.get(event.shardKey);
           playTone(sim, shard ? shardCollisionFrequency(shard) : 411, 0.08, 0.012 * (event.volume ?? 1));
           return;
@@ -521,6 +570,21 @@ export default function Home() {
         }
         const shard = sim.shards.get(event.shardKey);
         playTone(sim, shard ? shardBreakFrequency(shard) : 443, 0.34, 0.03);
+      });
+      propagationSounds.forEach(({ voice, frequency, volume }) => {
+        if (voice === "resonance") {
+          playHarmonicTone(sim, frequency, 0.12, 0.012 * volume, [
+            { ratio: 1, gain: 1 },
+            { ratio: 2, gain: 0.24 },
+            { ratio: 3, gain: 0.06 },
+          ]);
+          return;
+        }
+        playHarmonicTone(sim, frequency, 0.1, 0.012 * volume, [
+          { ratio: 1, gain: 1 },
+          { ratio: 1.5, gain: 0.13 },
+          { ratio: 2, gain: 0.18 },
+        ]);
       });
     };
 

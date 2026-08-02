@@ -54,6 +54,9 @@ test("keeps the prototype self-contained", async () => {
   assert.match(page, /^"use client";/);
   assert.match(page, /requestAnimationFrame/);
   assert.match(page, /AudioContext/);
+  assert.match(page, /playHarmonicTone/);
+  assert.match(page, /voice === "resonance"/);
+  assert.match(page, /voice: "resonance" \| "conduction"/);
   assert.match(page, /impactVoronoiCellsFor/);
   assert.match(page, /emptyRegionBounds/);
   assert.match(page, /emptyRegionEnclosingCircle/);
@@ -111,6 +114,7 @@ test("keeps the prototype self-contained", async () => {
   assert.match(worker, /case "load"/);
   assert.match(worker, /case "setTech"/);
   assert.match(wasmSimulation, /simulation\.wasm\?v=\$\{WASM_RUNTIME_VERSION\}/);
+  assert.match(wasmSimulation, /get_event_source_shard/);
   assert.match(packageJson, /build:wasm/);
   assert.match(saveState, /SaveStateVersion\.V2/);
   assert.match(saveState, /SaveStateVersion\.V1/);

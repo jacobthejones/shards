@@ -91,6 +91,7 @@ static int32_t conduction_unlocked;
 static int32_t event_count;
 static int32_t event_type[MAX_EVENTS_PER_STEP];
 static int32_t event_shard[MAX_EVENTS_PER_STEP];
+static int32_t event_source_shard[MAX_EVENTS_PER_STEP];
 static double last_score;
 static int32_t last_hits;
 static int32_t last_breaks;
@@ -269,10 +270,11 @@ static void mark_shard_damaged(int32_t shard) {
   DAMAGED_SHARDS[damaged_shard_count++] = shard;
 }
 
-static void record_event(int32_t type, int32_t shard) {
+static void record_event(int32_t type, int32_t shard, int32_t source_shard) {
   if (event_count >= MAX_EVENTS_PER_STEP) return;
   event_type[event_count] = type;
   event_shard[event_count] = shard;
+  event_source_shard[event_count] = source_shard;
   event_count += 1;
 }
 
@@ -448,7 +450,7 @@ static void damage_shard(
     total_breaks += 1;
     recent_break_rate += 60.0 / RECENT_BREAK_RATE_TIME_CONSTANT_SECONDS;
     score += 100.0;
-    record_event(3, shard);
+    record_event(3, shard, shard);
   }
 }
 
@@ -460,7 +462,7 @@ static void apply_resonance(int32_t source) {
     int32_t neighbor = first_neighbors[index];
     double shared_x, shared_y, inward_x, inward_y;
     if (!shared_edge_for_shards(source, neighbor, &shared_x, &shared_y, &inward_x, &inward_y)) continue;
-    record_event(2, neighbor);
+    record_event(2, neighbor, source);
     damage_shard(neighbor, RESONANCE_SPLASH_DAMAGE, shared_x, shared_y, inward_x, inward_y, 0);
   }
 
@@ -485,7 +487,7 @@ static void apply_resonance(int32_t source) {
     int32_t neighbor = second_neighbors[index];
     double shared_x, shared_y, inward_x, inward_y;
     if (!shared_edge_for_shards(second_parents[index], neighbor, &shared_x, &shared_y, &inward_x, &inward_y)) continue;
-    record_event(2, neighbor);
+    record_event(4, neighbor, source);
     damage_shard(neighbor, CONDUCTION_SPLASH_DAMAGE, shared_x, shared_y, inward_x, inward_y, 0);
   }
 }
@@ -780,7 +782,7 @@ static void step_simulation(void) {
         double bounced_y = BALL_VY[ball];
         BALL_VX[ball] = bounced_x * jitter_cosine - bounced_y * jitter_sine;
         BALL_VY[ball] = bounced_x * jitter_sine + bounced_y * jitter_cosine;
-        record_event(1, collision.shard);
+        record_event(1, collision.shard, collision.shard);
         if (BALL_HIT_COOLDOWN[ball] <= 0.0) {
           damage_shard(collision.shard, BASE_HIT_DAMAGE, collision.point_x, collision.point_y, -collision.normal_x, -collision.normal_y, 1);
           BALL_HIT_COOLDOWN[ball] = 0.14;
@@ -944,6 +946,7 @@ __attribute__((export_name("get_ball_count"))) int32_t get_ball_count(void) { re
 __attribute__((export_name("get_event_count"))) int32_t get_event_count(void) { return event_count; }
 __attribute__((export_name("get_event_type"))) int32_t get_event_type(int32_t index) { return index >= 0 && index < event_count ? event_type[index] : 0; }
 __attribute__((export_name("get_event_shard"))) int32_t get_event_shard(int32_t index) { return index >= 0 && index < event_count ? event_shard[index] : -1; }
+__attribute__((export_name("get_event_source_shard"))) int32_t get_event_source_shard(int32_t index) { return index >= 0 && index < event_count ? event_source_shard[index] : -1; }
 __attribute__((export_name("get_shard_gx"))) int32_t get_shard_gx(int32_t index) { return index >= 0 && index < shard_count ? SHARD_GX[index] : 0; }
 __attribute__((export_name("get_shard_gy"))) int32_t get_shard_gy(int32_t index) { return index >= 0 && index < shard_count ? SHARD_GY[index] : 0; }
 __attribute__((export_name("get_shard_sx"))) double get_shard_sx(int32_t index) { return index >= 0 && index < shard_count ? SHARD_SX[index] : 0.0; }

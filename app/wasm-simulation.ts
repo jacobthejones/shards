@@ -69,6 +69,7 @@ type WasmExports = {
   get_event_count: () => number;
   get_event_type: (index: number) => number;
   get_event_shard: (index: number) => number;
+  get_event_source_shard: (index: number) => number;
 };
 
 type ArrowMeta = Pick<Arrow, "id" | "hue">;
@@ -314,8 +315,27 @@ export class WasmSimulation {
       this.damagedShardIndices.add(shardIndex);
       const shard = this.staticShards[shardIndex];
       const type = this.wasm.get_event_type(index);
+      const sourceIndex = this.wasm.get_event_source_shard(index);
+      const sourceShard = sourceIndex >= 0 && sourceIndex < this.staticShards.length
+        ? this.staticShards[sourceIndex]
+        : shard;
       if (type === 1) events.push({ type: "collision", hue: shard.hue, shardKey: shard.key, volume: 1 });
-      if (type === 2) events.push({ type: "collision", hue: shard.hue, shardKey: shard.key, volume: 0.5 });
+      if (type === 2) events.push({
+        type: "collision",
+        hue: shard.hue,
+        shardKey: shard.key,
+        sourceShardKey: sourceShard.key,
+        voice: "resonance",
+        volume: 0.5,
+      });
+      if (type === 4) events.push({
+        type: "collision",
+        hue: shard.hue,
+        shardKey: shard.key,
+        sourceShardKey: sourceShard.key,
+        voice: "conduction",
+        volume: 0.32,
+      });
       if (type === 3) {
         this.brokenShardIndices.add(shardIndex);
         this.damagedShardIndices.delete(shardIndex);

@@ -72,6 +72,8 @@ export type SimulationEvent = {
   hue: number;
   shardKey: string;
   volume?: number;
+  voice?: "resonance" | "conduction";
+  sourceShardKey?: string;
 };
 
 export type StaticShardState = Pick<Shard, "key" | "gx" | "gy" | "sx" | "sy" | "points" | "hue" | "seed" | "fieldSeed">;

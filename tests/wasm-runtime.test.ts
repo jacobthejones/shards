@@ -86,7 +86,7 @@ test("Resonance and Conduction purchase, refund, and propagate damage", async ()
   for (let step = 0; step < 600; step += 1) {
     wasm.step_real_simulation(1);
     for (let index = 0; index < wasm.get_event_count(); index += 1) {
-      if (wasm.get_event_type(index) === 2) conductionEvents += 1;
+      if (wasm.get_event_type(index) === 4) conductionEvents += 1;
     }
   }
   assert.ok(conductionEvents > resonanceEvents);
