@@ -42,7 +42,7 @@ import {
 
 type InteractiveWorkerCommand = Exclude<SimulationWorkerCommand, { type: "load" }>;
 
-const AUDIO_GAIN = 3;
+const AUDIO_GAIN = 9;
 
 const playTone = (sim: Simulation, frequency: number, duration = 0.16, volume = 0.025) => {
   const audio = sim.audio;
