@@ -42,9 +42,10 @@ test("server-renders the shards experience", async () => {
 });
 
 test("keeps the prototype self-contained", async () => {
-  const [page, simulation, layout, css, packageJson] = await Promise.all([
+  const [page, simulation, worker, layout, css, packageJson] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/simulation.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/simulation.worker.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
     readFile(new URL("../package.json", import.meta.url), "utf8"),
@@ -93,6 +94,9 @@ test("keeps the prototype self-contained", async () => {
   assert.match(css, /\.field-canvas/);
   assert.match(css, /prefers-reduced-motion|@keyframes sound-wave/);
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
+  assert.match(worker, /self\.onmessage/);
+  assert.match(worker, /case "ping"/);
+  assert.match(worker, /sim\.score = ballCost\(sim\)/);
 });
 
 test("keeps the headless balance strategy runnable", async () => {

@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
+  BASE_BALL_RADIUS,
   FIXED_TIMESTEP,
   INITIAL_VIEW_RADIUS,
   STARTING_LUMENS,
@@ -12,8 +13,8 @@ import {
   createSimulation,
   emptyRegionBounds,
   emptyRegionEnclosingCircle,
-  impactVoronoiCellsFor,
   getHud,
+  impactVoronoiCellsFor,
   keyFor,
   refreshShardHealth,
   shardBreakFrequency,
@@ -25,6 +26,9 @@ import {
   type Simulation,
   type SimulationEvent,
   type SimulationHud as Hud,
+  type SimulationWorkerCommand,
+  type SimulationWorkerMessage,
+  type WorkerMetrics,
 } from "./simulation";
 
 const playTone = (sim: Simulation, frequency: number, duration = 0.16, volume = 0.025) => {
@@ -69,14 +73,45 @@ const ensureAudio = async (sim: Simulation) => {
   sim.audioUnlocked = sim.audio.context.state === "running";
 };
 
+const closeAudio = (sim: Simulation) => {
+  const audio = sim.audio;
+  sim.audio = null;
+  if (!audio || audio.context.state === "closed") return;
+  void audio.context.close().catch(() => {});
+};
+
 const formatScore = (score: number) => score.toLocaleString("en-US");
 const VIEWPORT_BORDER_INSET = 0.1;
 const VIEW_ZOOM_RATE = 0.7;
 const EMPTY_VIGNETTE_RATE = 0.35;
 
+const createRenderSimulation = (): Simulation => ({
+  shards: new Map(),
+  broken: new Set(),
+  arrows: [],
+  nextArrowId: 1,
+  nextImpactId: 1,
+  score: STARTING_LUMENS,
+  totalHits: 0,
+  totalBreaks: 0,
+  recentBreakRate: 0,
+  time: 0,
+  paused: true,
+  awaitingStart: true,
+  ballRadius: BASE_BALL_RADIUS,
+  random: () => 0.5,
+  audioEnabled: true,
+  audioUnlocked: false,
+  audio: null,
+});
+
 export default function Home() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const simRef = useRef<Simulation | null>(null);
+  const commandHandlerRef = useRef<(command: SimulationWorkerCommand) => void>(() => {});
+  const awaitingStartRef = useRef(true);
+  const startSimulationRef = useRef<() => void>(() => {});
+  const togglePauseRef = useRef<() => void>(() => {});
   const viewRadiusRef = useRef(INITIAL_VIEW_RADIUS);
   const emptyCircleRadiusRef = useRef(0);
   const emptyCircleCenterXRef = useRef(0);
@@ -90,14 +125,36 @@ export default function Home() {
   });
   const [audioOn, setAudioOn] = useState(true);
 
-  if (simRef.current == null) simRef.current = createSimulation();
+  if (simRef.current == null) simRef.current = createRenderSimulation();
 
-  const togglePause = () => {
+  const sendWorkerCommand = useCallback((command: SimulationWorkerCommand) => {
+    commandHandlerRef.current(command);
+  }, []);
+
+  const startSimulation = useCallback(() => {
+    if (!awaitingStartRef.current) return;
+    awaitingStartRef.current = false;
     const sim = simRef.current;
-    if (!sim) return;
-    sim.paused = !sim.paused;
-    setHud(getHud(sim));
-  };
+    if (sim) {
+      sim.awaitingStart = false;
+      sim.paused = false;
+    }
+    sendWorkerCommand({ type: "start" });
+    setHud((current) => ({ ...current, paused: false }));
+  }, [sendWorkerCommand]);
+
+  const togglePause = useCallback(() => {
+    if (awaitingStartRef.current) {
+      startSimulation();
+      return;
+    }
+    sendWorkerCommand({ type: "togglePause" });
+  }, [sendWorkerCommand, startSimulation]);
+
+  useEffect(() => {
+    startSimulationRef.current = startSimulation;
+    togglePauseRef.current = togglePause;
+  }, [startSimulation, togglePause]);
 
   const toggleAudio = async () => {
     const sim = simRef.current;
@@ -116,26 +173,24 @@ export default function Home() {
   };
 
   const buyArrow = () => {
+    if (hud.score < ballCostForCount(hud.arrows)) return;
+    sendWorkerCommand({ type: "addBall" });
     const sim = simRef.current;
-    if (!sim) return;
-    if (!buyBall(sim)) return;
-    setHud(getHud(sim));
-    playTone(sim, 523.25, 0.3, 0.04);
+    if (sim) playTone(sim, 523.25, 0.3, 0.04);
   };
 
   const resetRun = () => {
-    const currentAudio = simRef.current?.audio;
-    if (currentAudio) {
-      void currentAudio.context.close();
-    }
     const sim = simRef.current;
     if (!sim) return;
-    Object.assign(sim, createSimulation());
+    closeAudio(sim);
+    Object.assign(sim, createRenderSimulation());
+    awaitingStartRef.current = true;
+    sendWorkerCommand({ type: "reset" });
     viewRadiusRef.current = INITIAL_VIEW_RADIUS;
     emptyCircleRadiusRef.current = 0;
     emptyCircleCenterXRef.current = 0;
     emptyCircleCenterYRef.current = 0;
-    setHud(getHud(sim));
+    setHud({ score: STARTING_LUMENS, arrows: 1, ring: 1, rate: 0, paused: true });
     setAudioOn(true);
   };
 
@@ -145,6 +200,18 @@ export default function Home() {
     if (!canvas || !sim) return;
     const context = canvas.getContext("2d");
     if (!context) return;
+    let worker: Worker | null = null;
+    try {
+      if (typeof Worker !== "undefined") {
+        worker = new Worker(new URL("./simulation.worker.ts", import.meta.url), { type: "module" });
+      }
+    } catch {
+      worker = null;
+    }
+    if (!worker) {
+      Object.assign(sim, createSimulation());
+      awaitingStartRef.current = sim.awaitingStart;
+    }
 
     let width = 0;
     let height = 0;
@@ -152,6 +219,25 @@ export default function Home() {
     let frame = 0;
     let lastTime = performance.now();
     let hudTime = lastTime;
+    let metricsWindowStartedAt = lastTime;
+    let renderMs = 0;
+    let renderFrames = 0;
+    let latestWorkerMetrics: WorkerMetrics | null = null;
+    let fallbackAccumulator = 0;
+    let fallbackPhysicsMs = 0;
+    let fallbackPhysicsSteps = 0;
+    let fallbackSimulatedSeconds = 0;
+    const fallbackDamagedShardKeys = new Set<string>();
+    const metricsEnabled = new URLSearchParams(window.location.search).has("metrics");
+    const benchmarkBallCount = Number(new URLSearchParams(window.location.search).get("balls"));
+    let workerResponsive = worker === null;
+    let workerFallbackTimer: number | null = null;
+    let workerCommandTimer: number | null = null;
+    let pendingWorkerCommand: {
+      type: SimulationWorkerCommand["type"];
+      targetCount?: number;
+      targetPaused?: boolean;
+    } | null = null;
 
     const resize = () => {
       const bounds = canvas.getBoundingClientRect();
@@ -213,7 +299,6 @@ export default function Home() {
     };
 
     const drawShard = (shard: Shard, scale: number) => {
-      refreshShardHealth(sim, shard);
       const points = shardPoints(shard);
       const health = shard.health / shard.maxHealth;
       const damage = 1 - health;
@@ -270,6 +355,7 @@ export default function Home() {
     };
 
     const draw = () => {
+      const renderStartedAt = performance.now();
       context.clearRect(0, 0, width, height);
       const background = context.createRadialGradient(width * 0.5, height * 0.47, 0, width * 0.5, height * 0.47, Math.max(width, height) * 0.72);
       background.addColorStop(0, "#15353b");
@@ -325,6 +411,37 @@ export default function Home() {
       vignette.addColorStop(1, "rgba(3, 8, 13, 0.48)");
       context.fillStyle = vignette;
       context.fillRect(0, 0, width, height);
+
+      renderMs += performance.now() - renderStartedAt;
+      renderFrames += 1;
+      const now = performance.now();
+      if (metricsEnabled && now - metricsWindowStartedAt >= 1000) {
+        const windowMs = now - metricsWindowStartedAt;
+        const physicsMetrics = latestWorkerMetrics ?? (worker ? null : {
+          windowMs,
+          physicsMs: fallbackPhysicsMs,
+          physicsSteps: fallbackPhysicsSteps,
+          simulatedSeconds: fallbackSimulatedSeconds,
+        });
+        const metrics = {
+          simulationMode: worker ? "worker" : "main",
+          windowMs,
+          physicsMs: physicsMetrics?.physicsMs ?? 0,
+          physicsSteps: physicsMetrics?.physicsSteps ?? 0,
+          simulatedSeconds: physicsMetrics?.simulatedSeconds ?? 0,
+          renderMs,
+          renderFrames,
+          simulationRate: physicsMetrics ? physicsMetrics.simulatedSeconds / (physicsMetrics.windowMs / 1000) : 0,
+        };
+        (window as Window & { __SHARDS_METRICS__?: typeof metrics }).__SHARDS_METRICS__ = metrics;
+        console.info("[shards metrics]", JSON.stringify(metrics));
+        metricsWindowStartedAt = now;
+        renderMs = 0;
+        renderFrames = 0;
+        fallbackPhysicsMs = 0;
+        fallbackPhysicsSteps = 0;
+        fallbackSimulatedSeconds = 0;
+      }
     };
 
     const handleEvents = (events: SimulationEvent[]) => {
@@ -342,29 +459,227 @@ export default function Home() {
       });
     };
 
-    let accumulator = 0;
+    const updateHud = () => {
+      setHud(getHud(sim));
+    };
+
+    const applyWorkerState = (state: Extract<SimulationWorkerMessage, { type: "state" | "ready" }>['state'], events: SimulationEvent[]) => {
+      const wasPaused = sim.paused;
+      sim.time = state.time;
+      sim.score = state.score;
+      sim.totalHits = state.totalHits;
+      sim.totalBreaks = state.totalBreaks;
+      sim.recentBreakRate = state.recentBreakRate;
+      sim.paused = state.paused;
+      sim.awaitingStart = state.awaitingStart;
+      sim.arrows = state.arrows.map((arrow) => ({ ...arrow }));
+      sim.broken = new Set(state.broken);
+      state.shards.forEach((dynamicShard) => {
+        const shard = sim.shards.get(dynamicShard.key);
+        if (!shard) return;
+        shard.health = dynamicShard.health;
+        shard.maxHealth = dynamicShard.maxHealth;
+        shard.healthUpdatedAt = dynamicShard.healthUpdatedAt;
+        shard.impacts = dynamicShard.impacts.map((impact) => ({ ...impact }));
+      });
+      if (events.length > 0) handleEvents(events);
+
+      const now = performance.now();
+      if (wasPaused !== state.paused || now - hudTime >= 180) {
+        updateHud();
+        hudTime = now;
+      }
+    };
+
+    const refreshFallbackDamagedShards = () => {
+      fallbackDamagedShardKeys.forEach((key) => {
+        const shard = sim.shards.get(key);
+        if (shard) refreshShardHealth(sim, shard);
+      });
+      fallbackDamagedShardKeys.forEach((key) => {
+        const shard = sim.shards.get(key);
+        if (!shard || sim.broken.has(key) || (shard.impacts.length === 0 && shard.health >= shard.maxHealth)) {
+          fallbackDamagedShardKeys.delete(key);
+        }
+      });
+    };
+
+    let activateFallback = () => {};
+    const acknowledgeWorkerState = (state: Extract<SimulationWorkerMessage, { type: "state" | "ready" }>['state']) => {
+      if (!pendingWorkerCommand) return;
+      const satisfied = pendingWorkerCommand.type === "start"
+        ? !state.paused && !state.awaitingStart
+        : pendingWorkerCommand.type === "togglePause"
+          ? state.paused === pendingWorkerCommand.targetPaused
+          : pendingWorkerCommand.type === "reset"
+            ? state.time === 0 && state.awaitingStart && state.arrows.length === 1
+            : pendingWorkerCommand.type === "addBall"
+              ? state.arrows.length === pendingWorkerCommand.targetCount
+              : pendingWorkerCommand.type === "setBallCount"
+                ? state.arrows.length === pendingWorkerCommand.targetCount
+                : true;
+      if (!satisfied) return;
+      pendingWorkerCommand = null;
+      if (workerCommandTimer !== null) window.clearTimeout(workerCommandTimer);
+      workerCommandTimer = null;
+    };
+    const commandHandler = (command: SimulationWorkerCommand) => {
+      if (worker) {
+        const workerAtSend = worker;
+        pendingWorkerCommand = {
+          type: command.type,
+          ...(command.type === "togglePause" ? { targetPaused: !sim.paused } : {}),
+          ...(command.type === "addBall" ? { targetCount: sim.arrows.length + 1 } : {}),
+          ...(command.type === "setBallCount" ? { targetCount: Math.max(1, Math.floor(command.count)) } : {}),
+        };
+        worker.postMessage(command);
+        if (command.type !== "ping") {
+          if (workerCommandTimer !== null) window.clearTimeout(workerCommandTimer);
+          workerCommandTimer = window.setTimeout(() => {
+            if (worker === workerAtSend && pendingWorkerCommand?.type === command.type) activateFallback();
+          }, 500);
+        }
+        return;
+      }
+      switch (command.type) {
+        case "ping":
+          updateHud();
+          break;
+        case "start":
+          sim.awaitingStart = false;
+          sim.paused = false;
+          updateHud();
+          break;
+        case "togglePause":
+          sim.awaitingStart = false;
+          sim.paused = !sim.paused;
+          updateHud();
+          break;
+        case "reset":
+          Object.assign(sim, createSimulation());
+          fallbackAccumulator = 0;
+          fallbackDamagedShardKeys.clear();
+          awaitingStartRef.current = true;
+          updateHud();
+          break;
+        case "addBall":
+          if (buyBall(sim)) updateHud();
+          break;
+        case "setBallCount": {
+          const targetCount = Math.max(1, Math.floor(command.count));
+          while (sim.arrows.length < targetCount) {
+            sim.score = ballCostForCount(sim.arrows.length);
+            if (!buyBall(sim)) break;
+          }
+          if (sim.arrows.length > targetCount) sim.arrows = sim.arrows.slice(0, targetCount);
+          updateHud();
+          break;
+        }
+      }
+    };
+    commandHandlerRef.current = commandHandler;
+
+    activateFallback = () => {
+      if (!worker) return;
+      const shouldRun = !sim.paused && !sim.awaitingStart;
+      worker.terminate();
+      worker = null;
+      workerResponsive = true;
+      pendingWorkerCommand = null;
+      if (workerCommandTimer !== null) window.clearTimeout(workerCommandTimer);
+      workerCommandTimer = null;
+      Object.assign(sim, createSimulation());
+      if (shouldRun) {
+        sim.paused = false;
+        sim.awaitingStart = false;
+      }
+      fallbackAccumulator = 0;
+      fallbackDamagedShardKeys.clear();
+      awaitingStartRef.current = sim.awaitingStart;
+      if (metricsEnabled && Number.isInteger(benchmarkBallCount) && benchmarkBallCount > 1) {
+        commandHandler({ type: "setBallCount", count: benchmarkBallCount });
+      }
+      updateHud();
+    };
+
+    if (worker) {
+      worker.onerror = activateFallback;
+      worker.onmessage = (message: MessageEvent<SimulationWorkerMessage>) => {
+        if (message.data.type === "ready") {
+          if (workerCommandTimer !== null) window.clearTimeout(workerCommandTimer);
+          sim.shards = new Map(message.data.shards.map((shard) => [shard.key, {
+            ...shard,
+            health: 1,
+            maxHealth: 1,
+            healthUpdatedAt: 0,
+            impacts: [],
+          }]));
+          awaitingStartRef.current = message.data.state.awaitingStart;
+          applyWorkerState(message.data.state, []);
+          acknowledgeWorkerState(message.data.state);
+          worker?.postMessage({ type: "ping" });
+          if (metricsEnabled && Number.isInteger(benchmarkBallCount) && benchmarkBallCount > 1) {
+            commandHandler({ type: "setBallCount", count: benchmarkBallCount });
+          }
+          viewRadiusRef.current = INITIAL_VIEW_RADIUS;
+          emptyCircleRadiusRef.current = 0;
+          emptyCircleCenterXRef.current = 0;
+          emptyCircleCenterYRef.current = 0;
+          updateHud();
+          return;
+        }
+        if (message.data.type === "state") {
+          workerResponsive = true;
+          awaitingStartRef.current = message.data.state.awaitingStart;
+          applyWorkerState(message.data.state, message.data.events);
+          acknowledgeWorkerState(message.data.state);
+          return;
+        }
+        latestWorkerMetrics = message.data.metrics;
+      };
+    } else {
+      if (metricsEnabled && Number.isInteger(benchmarkBallCount) && benchmarkBallCount > 1) {
+        commandHandler({ type: "setBallCount", count: benchmarkBallCount });
+      }
+    }
+    if (worker) {
+      workerFallbackTimer = window.setTimeout(() => {
+        if (!workerResponsive) activateFallback();
+      }, 1500);
+    }
+
     const tick = (now: number) => {
       const wallDelta = Math.min(0.25, Math.max(0, (now - lastTime) / 1000));
       lastTime = now;
-      if (sim.paused) {
-        accumulator = 0;
-      } else {
-        accumulator += wallDelta;
+
+      if (!worker) {
+        fallbackAccumulator += wallDelta;
+        const events: SimulationEvent[] = [];
         let steps = 0;
-        while (accumulator >= FIXED_TIMESTEP && steps < 8) {
-          handleEvents(stepSimulation(sim, FIXED_TIMESTEP));
-          accumulator -= FIXED_TIMESTEP;
+        while (!sim.paused && fallbackAccumulator >= FIXED_TIMESTEP && steps < 8) {
+          const physicsStartedAt = performance.now();
+          const stepEvents = stepSimulation(sim, FIXED_TIMESTEP);
+          fallbackPhysicsMs += performance.now() - physicsStartedAt;
+          fallbackPhysicsSteps += 1;
+          fallbackSimulatedSeconds += FIXED_TIMESTEP;
+          stepEvents.forEach((event) => {
+            events.push(event);
+            if (event.type === "hit") fallbackDamagedShardKeys.add(event.shardKey);
+          });
+          fallbackAccumulator -= FIXED_TIMESTEP;
           steps += 1;
+        }
+        refreshFallbackDamagedShards();
+        if (events.length > 0) handleEvents(events);
+        if (steps > 0 && performance.now() - hudTime >= 180) {
+          updateHud();
+          hudTime = performance.now();
         }
       }
 
       updateCamera(wallDelta);
       updateEmptyCircle(wallDelta);
       draw();
-      if (now - hudTime > 180) {
-        setHud(getHud(sim));
-        hudTime = now;
-      }
       frame = window.requestAnimationFrame(tick);
     };
     resize();
@@ -375,16 +690,11 @@ export default function Home() {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.code === "Space" && event.target === document.body) {
         event.preventDefault();
-        togglePause();
+        togglePauseRef.current();
       }
     };
     const startOnInteraction = () => {
-      const needsStart = sim.awaitingStart;
-      sim.awaitingStart = false;
-      if (needsStart && sim.paused) {
-        sim.paused = false;
-        setHud(getHud(sim));
-      }
+      if (awaitingStartRef.current) startSimulationRef.current();
       if (sim.audioEnabled) void ensureAudio(sim);
     };
     void ensureAudio(sim);
@@ -398,9 +708,11 @@ export default function Home() {
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("click", startOnInteraction);
       window.removeEventListener("keydown", startOnInteraction);
-      if (sim.audio) {
-        void sim.audio.context.close();
-      }
+      commandHandlerRef.current = () => {};
+      if (workerFallbackTimer !== null) window.clearTimeout(workerFallbackTimer);
+      if (workerCommandTimer !== null) window.clearTimeout(workerCommandTimer);
+      worker?.terminate();
+      closeAudio(sim);
     };
   }, []);
 

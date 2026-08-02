@@ -17,7 +17,7 @@ import {
   type Arrow,
   type Shard,
   type Simulation,
-} from "../app/simulation.ts";
+} from "../app/simulation";
 
 const EPSILON = 0.000001;
 

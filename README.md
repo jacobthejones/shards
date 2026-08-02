@@ -23,6 +23,10 @@ Open [http://localhost:3000](http://localhost:3000).
 - `npm run balance`: run deterministic headless balance simulations
 - `npm run check-voronoi`: check randomized fields for overlapping cells
 
+For runtime profiling, add `?metrics=1` to the local URL. Add `&balls=10` to
+start with ten balls for a repeatable stress check. The browser logs one-second
+windows containing physics time, simulated time, render time, and frame count.
+
 The headless balance runner uses the same seeded, fixed-timestep simulation
 engine as the canvas game. It buys an Add ball upgrade whenever possible and
 reports upgrade intervals grouped by game-time bracket.

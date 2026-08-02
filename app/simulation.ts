@@ -78,6 +78,43 @@ export type SimulationEvent = {
   shardKey: string;
 };
 
+export type StaticShardState = Pick<Shard, "key" | "gx" | "gy" | "sx" | "sy" | "points" | "hue" | "seed" | "fieldSeed">;
+
+export type DynamicShardState = Pick<Shard, "key" | "health" | "maxHealth" | "healthUpdatedAt" | "impacts">;
+
+export type WorkerSimulationState = {
+  time: number;
+  score: number;
+  totalHits: number;
+  totalBreaks: number;
+  recentBreakRate: number;
+  paused: boolean;
+  awaitingStart: boolean;
+  arrows: Arrow[];
+  broken: string[];
+  shards: DynamicShardState[];
+};
+
+export type WorkerMetrics = {
+  windowMs: number;
+  physicsMs: number;
+  physicsSteps: number;
+  simulatedSeconds: number;
+};
+
+export type SimulationWorkerCommand =
+  | { type: "ping" }
+  | { type: "start" }
+  | { type: "togglePause" }
+  | { type: "reset" }
+  | { type: "addBall" }
+  | { type: "setBallCount"; count: number };
+
+export type SimulationWorkerMessage =
+  | { type: "ready"; shards: StaticShardState[]; state: WorkerSimulationState }
+  | { type: "state"; events: SimulationEvent[]; state: WorkerSimulationState }
+  | { type: "metrics"; metrics: WorkerMetrics };
+
 export const CELL_SIZE = 1;
 export const STARTING_LUMENS = 0;
 export const TAU = Math.PI * 2;
