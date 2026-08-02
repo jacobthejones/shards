@@ -77,6 +77,14 @@ const advanceToEvent = (wasm: Record<string, (...args: number[]) => number>, eve
   assert.fail(`event type ${eventType} did not occur during the collision setup`);
 };
 
+const advanceUntilGrowing = (wasm: Record<string, (...args: number[]) => number>, shard: number) => {
+  for (let step = 0; step < 240; step += 1) {
+    wasm.step_real_simulation(1);
+    if (wasm.get_shard_growing(shard) !== 0) return;
+  }
+  assert.fail("shard did not begin growing after the chosen ball passed through it");
+};
+
 test("The Chosen One purchase and refund use the original ball", async () => {
   const wasm = await loadRuntime();
   wasm.initialize_real_simulation(7, 77, 2);
@@ -118,20 +126,24 @@ test("New Growth starts only when the chosen ball sweeps through an empty cell",
   wasm.step_real_simulation(1);
 
   const centerShard = centerShardIndexFor(wasm);
+  assert.equal(wasm.get_shard_growing(centerShard), 0);
   let growthEvents = 0;
-  for (let index = 0; index < wasm.get_event_count(); index += 1) {
-    if (wasm.get_event_type(index) === 5) growthEvents += 1;
+  for (let step = 0; step < 120 && wasm.get_shard_growing(centerShard) === 0; step += 1) {
+    wasm.step_real_simulation(1);
+    for (let index = 0; index < wasm.get_event_count(); index += 1) {
+      if (wasm.get_event_type(index) === 5) growthEvents += 1;
+    }
   }
   assert.ok(growthEvents > 0);
   assert.equal(wasm.is_shard_broken(centerShard), 1);
   assert.equal(wasm.get_shard_growing(centerShard), 1);
-  assert.ok(wasm.get_shard_growth(centerShard) > 0.1);
-  assert.ok(wasm.get_shard_growth(centerShard) < 0.101);
+  assert.ok(wasm.get_shard_growth(centerShard) > 0.5);
+  assert.ok(wasm.get_shard_growth(centerShard) < 0.501);
 
   wasm.set_ball_state(0, 100, 100, 0, 0, 0);
   wasm.step_real_simulation(60);
-  assert.ok(wasm.get_shard_growth(centerShard) > 0.119);
-  assert.ok(wasm.get_shard_growth(centerShard) < 0.122);
+  assert.ok(wasm.get_shard_growth(centerShard) > 0.519);
+  assert.ok(wasm.get_shard_growth(centerShard) < 0.522);
 
   wasm.step_real_simulation(6_000);
   assert.equal(wasm.is_shard_broken(centerShard), 0);
@@ -148,8 +160,9 @@ test("A ball passing through a growing cell resets it without reflecting", async
   wasm.set_all_shards_broken(1);
   wasm.set_ball_state(0, 0, 0, -1.4366976021418008, 0, 0);
   wasm.set_ball_state(1, 100, 100, 0, 0, 0);
-  wasm.step_real_simulation(1);
   const centerShard = centerShardIndexFor(wasm);
+  wasm.step_real_simulation(1);
+  advanceUntilGrowing(wasm, centerShard);
 
   wasm.set_ball_state(0, 100, 100, 0, 0, 0);
   wasm.set_ball_state(1, 0, 0, -1.4366976021418008, 0, 0);

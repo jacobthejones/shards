@@ -20,7 +20,7 @@
 #define SHARD_MAX_HEALTH 1.0
 #define BASE_HIT_DAMAGE 0.2
 #define SHARD_REGENERATION_RATE 0.01
-#define SHARD_GROWTH_INITIAL 0.10
+#define SHARD_GROWTH_INITIAL 0.50
 #define SHARD_GROWTH_RATE 0.02
 #define HEALTH_EPSILON 0.000000001
 #define INITIAL_BALL_COST 300.0
@@ -33,7 +33,7 @@
 #define CONDUCTION_SPLASH_DAMAGE 0.05
 #define CHOSEN_ONE_DAMAGE_MULTIPLIER 5.0
 #define CHOSEN_BALL_INDEX 0
-#define SIMULATION_RUNTIME_VERSION 5
+#define SIMULATION_RUNTIME_VERSION 6
 #define BOUNCE_JITTER_RADIANS (0.02 * 3.1415926535897932384626433832795 / 180.0)
 #define COLLISION_SEPARATION 0.004
 #define MAX_COLLISIONS_PER_STEP 4
@@ -65,6 +65,7 @@ static double SHARD_HEALTH[MAX_SHARDS];
 static double SHARD_HEALTH_UPDATED_AT[MAX_SHARDS];
 static double SHARD_GROWTH[MAX_SHARDS];
 static int32_t SHARD_GROWING[MAX_SHARDS];
+static int32_t SHARD_GROWTH_PENDING[MAX_SHARDS];
 static double SHARD_HUE[MAX_SHARDS];
 static double SHARD_SEED[MAX_SHARDS];
 static int32_t SHARD_BROKEN[MAX_SHARDS];
@@ -382,6 +383,7 @@ static void begin_shard_growth(int32_t shard) {
   if (!SHARD_BROKEN[shard] || SHARD_GROWING[shard]) return;
   SHARD_GROWTH[shard] = SHARD_GROWTH_INITIAL;
   SHARD_GROWING[shard] = 1;
+  SHARD_GROWTH_PENDING[shard] = 0;
   mark_shard_damaged(shard);
   record_event(5, shard, shard);
 }
@@ -390,6 +392,7 @@ static void reset_shard_growth(int32_t shard) {
   if (!SHARD_GROWING[shard]) return;
   SHARD_GROWTH[shard] = 0.0;
   SHARD_GROWING[shard] = 0;
+  SHARD_GROWTH_PENDING[shard] = 0;
   mark_shard_damaged(shard);
   record_event(6, shard, shard);
 }
@@ -629,6 +632,7 @@ static void initialize_field(double field_seed) {
       SHARD_HEALTH_UPDATED_AT[shard] = 0.0;
       SHARD_GROWTH[shard] = 0.0;
       SHARD_GROWING[shard] = 0;
+      SHARD_GROWTH_PENDING[shard] = 0;
       SHARD_SEED[shard] = seeded_hash((double)gx + 4.8, (double)gy - 2.3, field_seed);
       SHARD_HUE[shard] = 162.0 + seeded_hash((double)gx + 4.8, (double)gy - 2.3, field_seed) * 72.0 + sqrt((double)gx * gx + (double)gy * gy) * 2.2;
       SHARD_BROKEN[shard] = circle_intersects_polygon(0.0, 0.0, BASE_BALL_RADIUS, shard);
@@ -882,12 +886,23 @@ static void process_growth_path(int32_t ball, double x, double y, double next_x,
     for (int32_t gx = min_x; gx <= max_x; gx += 1) {
       if (!in_grid(gx, gy)) continue;
       int32_t shard = GRID[grid_index(gx, gy)];
-      if (shard < 0 || !segment_intersects_polygon(x, y, next_x, next_y, BASE_BALL_RADIUS, shard)) continue;
-      if (SHARD_GROWING[shard]) {
+      if (shard < 0) continue;
+      int32_t path_intersects = segment_intersects_polygon(x, y, next_x, next_y, BASE_BALL_RADIUS, shard);
+      if (SHARD_GROWING[shard] && path_intersects) {
         reset_shard_growth(shard);
-      } else if (can_start && SHARD_BROKEN[shard]) {
-        begin_shard_growth(shard);
+        continue;
       }
+      if (!can_start || !SHARD_BROKEN[shard]) continue;
+
+      int32_t current_overlaps = circle_intersects_polygon(x, y, BASE_BALL_RADIUS, shard);
+      int32_t endpoint_overlaps = circle_intersects_polygon(next_x, next_y, BASE_BALL_RADIUS, shard);
+      if (SHARD_GROWTH_PENDING[shard]) {
+        if (!current_overlaps && (!path_intersects || !endpoint_overlaps)) begin_shard_growth(shard);
+        continue;
+      }
+      if (!path_intersects) continue;
+      if (current_overlaps || endpoint_overlaps) SHARD_GROWTH_PENDING[shard] = 1;
+      else begin_shard_growth(shard);
     }
   }
 }
@@ -1093,6 +1108,7 @@ __attribute__((export_name("set_all_shards_broken"))) void set_all_shards_broken
     if (broken) {
       SHARD_GROWTH[index] = 0.0;
       SHARD_GROWING[index] = 0;
+      SHARD_GROWTH_PENDING[index] = 0;
     }
   }
 }
@@ -1102,6 +1118,7 @@ __attribute__((export_name("set_shard_broken"))) void set_shard_broken(int32_t s
     if (broken) {
       SHARD_GROWTH[shard] = 0.0;
       SHARD_GROWING[shard] = 0;
+      SHARD_GROWTH_PENDING[shard] = 0;
     }
   }
 }
@@ -1109,6 +1126,7 @@ __attribute__((export_name("set_shard_growth"))) void set_shard_growth(int32_t s
   if (shard < 0 || shard >= shard_count) return;
   SHARD_GROWTH[shard] = growth < 0.0 ? 0.0 : growth > 1.0 ? 1.0 : growth;
   SHARD_GROWING[shard] = growing && SHARD_BROKEN[shard] ? 1 : 0;
+  SHARD_GROWTH_PENDING[shard] = 0;
   if (SHARD_GROWING[shard]) mark_shard_damaged(shard);
 }
 __attribute__((export_name("set_shard_health"))) void set_shard_health(int32_t shard, double health, double updated_at) {
