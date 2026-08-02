@@ -8,6 +8,8 @@ export type Shard = {
   health: number;
   maxHealth: number;
   healthUpdatedAt: number;
+  growth: number;
+  growing: boolean;
   impacts: ShardImpact[];
   hue: number;
   seed: number;
@@ -71,7 +73,7 @@ export type SimulationHud = {
 };
 
 export type SimulationEvent = {
-  type: "collision" | "hit" | "break";
+  type: "collision" | "hit" | "break" | "growth";
   hue: number;
   shardKey: string;
   volume?: number;
@@ -81,7 +83,7 @@ export type SimulationEvent = {
 
 export type StaticShardState = Pick<Shard, "key" | "gx" | "gy" | "sx" | "sy" | "points" | "hue" | "seed" | "fieldSeed">;
 
-export type DynamicShardState = Pick<Shard, "key" | "health" | "maxHealth" | "healthUpdatedAt" | "impacts">;
+export type DynamicShardState = Pick<Shard, "key" | "health" | "maxHealth" | "healthUpdatedAt" | "growth" | "growing" | "impacts">;
 
 export type WorkerSimulationState = {
   fieldSeed: number;
@@ -114,7 +116,7 @@ export type SimulationWorkerCommand =
   | { type: "togglePause" }
   | { type: "reset" }
   | { type: "addBall" }
-  | { type: "setTech"; tech: "chosen-one" | "resonance" | "conduction"; enabled: boolean }
+  | { type: "setTech"; tech: "chosen-one" | "new-growth" | "resonance" | "conduction"; enabled: boolean }
   | { type: "setBallCount"; count: number }
   | { type: "load"; save: import("./save-state").SaveState };
 

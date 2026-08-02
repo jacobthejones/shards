@@ -195,6 +195,13 @@ const ConductionIcon = () => (
   </svg>
 );
 
+const NewGrowthIcon = () => (
+  <svg className="new-growth-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+    <path d="M12 21V12M12 12C10.6 9.7 8.8 8.4 6.2 8.1M12 12C13.4 9.7 15.2 8.4 17.8 8.1M6.2 8.1C5.4 6.5 5.7 4.6 7.1 3.2M17.8 8.1C18.6 6.5 18.3 4.6 16.9 3.2" stroke="currentColor" strokeWidth="1.45" strokeLinecap="round" strokeLinejoin="round" />
+    <path d="M6.4 8.2C8.4 8.4 10 9.2 12 11.5C14 9.2 15.6 8.4 17.6 8.2" stroke="currentColor" strokeWidth="1.15" strokeLinecap="round" />
+  </svg>
+);
+
 const createRenderSimulation = (): Simulation => ({
   shards: new Map(),
   broken: new Set(),
@@ -531,6 +538,14 @@ export default function Home() {
       targetContext.stroke(path);
     };
 
+    const drawGrowingShard = (targetContext: ChunkContext, shard: Shard) => {
+      const growth = Math.max(0, Math.min(1, shard.growth));
+      if (growth <= 0) return;
+      targetContext.strokeStyle = `hsla(${shard.hue}, 50%, 74%, ${growth})`;
+      targetContext.lineWidth = 0.012;
+      targetContext.stroke(shardPathFor(shard));
+    };
+
     const createChunkSurface = (): RenderChunkSurface => {
       const pixelSize = Math.ceil((RENDER_CHUNK_SIZE + RENDER_CHUNK_PADDING * 2) * chunkRasterScale);
       const chunkCanvas: ChunkCanvas = typeof OffscreenCanvas === "undefined"
@@ -558,6 +573,8 @@ export default function Home() {
         broken: sim.broken.has(shard.key),
         health: shard.health,
         maxHealth: shard.maxHealth,
+        growth: shard.growth,
+        growing: shard.growing,
         hue: shard.hue,
         impacts: shard.impacts,
       })));
@@ -584,7 +601,10 @@ export default function Home() {
           );
           chunk.context.globalAlpha = 1;
           shards.forEach((shard) => {
-            if (sim.broken.has(shard.key)) return;
+            if (sim.broken.has(shard.key)) {
+              if (shard.growing) drawGrowingShard(chunk.context, shard);
+              return;
+            }
             drawShard(chunk.context, shard, scale);
           });
         },
@@ -728,6 +748,10 @@ export default function Home() {
         if (event.type === "hit") {
           return;
         }
+        if (event.type === "growth") {
+          playTone(sim, 680, 0.05, 0.0018);
+          return;
+        }
         const shard = sim.shards.get(event.shardKey);
         playTone(sim, shard ? shardBreakFrequency(shard) : 443, 0.34, 0.03);
       });
@@ -785,6 +809,8 @@ export default function Home() {
         if (sim.broken.has(shard.key) || dynamicShardKeys.has(shard.key)) return;
         shard.health = shard.maxHealth;
         shard.healthUpdatedAt = sim.time;
+        shard.growth = 0;
+        shard.growing = false;
         shard.impacts = [];
       });
       state.shards.forEach((dynamicShard) => {
@@ -793,6 +819,8 @@ export default function Home() {
         shard.health = dynamicShard.health;
         shard.maxHealth = dynamicShard.maxHealth;
         shard.healthUpdatedAt = dynamicShard.healthUpdatedAt;
+        shard.growth = dynamicShard.growth;
+        shard.growing = dynamicShard.growing;
         shard.impacts = dynamicShard.impacts.map((impact) => ({ ...impact }));
       });
       if (events.length > 0) handleEvents(events);
@@ -841,6 +869,8 @@ export default function Home() {
             health: 1,
             maxHealth: 1,
             healthUpdatedAt: 0,
+            growth: 0,
+            growing: false,
             impacts: [],
           }]));
           awaitingStartRef.current = message.data.state.awaitingStart;
@@ -983,6 +1013,7 @@ export default function Home() {
                           aria-label={`${tech.title}${unlocked ? " unlocked" : " technology"}`}
                         >
                           {tech.icon === "chosen-one" && <ChosenOneIcon />}
+                          {tech.icon === "new-growth" && <NewGrowthIcon />}
                           {tech.icon === "resonance" && <ResonanceIcon />}
                           {tech.icon === "conduction" && <ConductionIcon />}
                         </button>

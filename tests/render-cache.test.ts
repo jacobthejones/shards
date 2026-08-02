@@ -16,6 +16,8 @@ const shard = (overrides: Partial<{
   broken: boolean;
   health: number;
   maxHealth: number;
+  growth: number;
+  growing: boolean;
   hue: number;
   impacts: { id: number; x: number; y: number; inwardX: number; inwardY: number; strength: number }[];
 }> = {}) => ({
@@ -23,6 +25,8 @@ const shard = (overrides: Partial<{
   broken: false,
   health: 1,
   maxHealth: 1,
+  growth: 0,
+  growing: false,
   hue: 180,
   impacts: [],
   ...overrides,
@@ -53,6 +57,7 @@ test("render signatures change for visual state but ignore non-visual timestamps
   assert.notEqual(renderChunkSignature(8, true, [base]), signature, "a new field must rebuild the chunk");
   assert.notEqual(renderChunkSignature(7, false, [base]), signature, "fracture visibility changes the cached pixels");
   assert.notEqual(renderChunkSignature(7, true, [shard({ health: 0.8 })]), signature, "healing/damage changes fill color");
+  assert.notEqual(renderChunkSignature(7, true, [shard({ growth: 0.4, growing: true })]), signature, "growth changes the outline");
   assert.notEqual(renderChunkSignature(7, true, [shard({ broken: true })]), signature, "breaking removes the shard from the chunk");
   assert.notEqual(renderChunkSignature(7, true, [shard({ impacts: [{ id: 1, x: 0, y: 0, inwardX: 1, inwardY: 0, strength: 0.2 }] })]), signature, "new fractures change the chunk");
 });

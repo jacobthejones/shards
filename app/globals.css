@@ -323,7 +323,8 @@ button:focus-visible {
 
 .resonance-icon,
 .conduction-icon,
-.chosen-one-icon {
+.chosen-one-icon,
+.new-growth-icon {
   display: block;
   width: 29px;
   height: 29px;

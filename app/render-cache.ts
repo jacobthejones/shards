@@ -21,6 +21,8 @@ export type RenderShardState = {
   broken: boolean;
   health: number;
   maxHealth: number;
+  growth: number;
+  growing: boolean;
   hue: number;
   impacts: readonly RenderImpactState[];
 };
@@ -86,6 +88,8 @@ export const renderChunkSignature = (
     shard.broken ? 1 : 0,
     shard.health,
     shard.maxHealth,
+    shard.growth,
+    shard.growing ? 1 : 0,
     shard.hue,
     fracturesVisible ? shard.impacts.map(impactSignature).join(";") : "",
   ].join("|")),

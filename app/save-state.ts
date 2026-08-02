@@ -7,9 +7,10 @@ import {
 export enum SaveStateVersion {
   V1 = 1,
   V2 = 2,
+  V3 = 3,
 }
 
-export const CURRENT_SAVE_STATE_VERSION = SaveStateVersion.V2;
+export const CURRENT_SAVE_STATE_VERSION = SaveStateVersion.V3;
 export const SAVE_STATE_STORAGE_KEY = "shards.game.save";
 export const SAVE_STATE_INTERVAL_MS = 15_000;
 
@@ -29,7 +30,7 @@ export type SaveStateV1 = {
   nextImpactId: number;
   arrows: Arrow[];
   broken: string[];
-  shards: DynamicShardState[];
+  shards: Omit<DynamicShardState, "growth" | "growing">[];
 };
 
 export type SaveStateV2 = Omit<SaveStateV1, "version"> & {
@@ -37,7 +38,12 @@ export type SaveStateV2 = Omit<SaveStateV1, "version"> & {
   unlockedTechs: string[];
 };
 
-export type SaveState = SaveStateV2;
+export type SaveStateV3 = Omit<SaveStateV2, "version" | "shards"> & {
+  version: SaveStateVersion.V3;
+  shards: DynamicShardState[];
+};
+
+export type SaveState = SaveStateV3;
 export type SaveStateMigration = (value: unknown) => SaveState;
 
 export const SAVE_STATE_VERSIONS = Object.values(SaveStateVersion).filter(
@@ -90,7 +96,7 @@ const impactValue = (value: unknown) => {
   };
 };
 
-const dynamicShardValue = (value: unknown): DynamicShardState => {
+const dynamicShardValue = (value: unknown, includesGrowth: boolean): DynamicShardState => {
   if (!isRecord(value)) throw new Error("Invalid save shard");
   if (!Array.isArray(value.impacts)) throw new Error("Invalid save shard impacts");
   return {
@@ -98,6 +104,8 @@ const dynamicShardValue = (value: unknown): DynamicShardState => {
     health: finiteNumber(value.health, "shard.health"),
     maxHealth: finiteNumber(value.maxHealth, "shard.maxHealth"),
     healthUpdatedAt: finiteNumber(value.healthUpdatedAt, "shard.healthUpdatedAt"),
+    growth: includesGrowth ? finiteNumber(value.growth, "shard.growth") : 0,
+    growing: includesGrowth ? booleanValue(value.growing, "shard.growing") : false,
     impacts: value.impacts.map(impactValue),
   };
 };
@@ -109,7 +117,7 @@ const migrateV1 = (value: unknown): SaveState => {
   }
 
   return {
-    version: SaveStateVersion.V2,
+    version: SaveStateVersion.V3,
     savedAt: finiteNumber(value.savedAt, "savedAt"),
     fieldSeed: finiteNumber(value.fieldSeed, "fieldSeed"),
     randomState: finiteNumber(value.randomState, "randomState"),
@@ -124,7 +132,7 @@ const migrateV1 = (value: unknown): SaveState => {
     nextImpactId: finiteNumber(value.nextImpactId, "nextImpactId"),
     arrows: value.arrows.map(arrowValue),
     broken: value.broken.map((key) => stringValue(key, "broken key")),
-    shards: value.shards.map(dynamicShardValue),
+    shards: value.shards.map((shard) => dynamicShardValue(shard, false)),
     unlockedTechs: [],
   };
 };
@@ -134,14 +142,28 @@ const migrateV2 = (value: unknown): SaveState => {
   if (!isRecord(value) || !Array.isArray(value.unlockedTechs)) throw new Error("Invalid save tech state");
   return {
     ...migrated,
-    version: SaveStateVersion.V2,
+    version: SaveStateVersion.V3,
     unlockedTechs: value.unlockedTechs.map((tech) => stringValue(tech, "unlocked tech")),
+  };
+};
+
+const migrateV3 = (value: unknown): SaveState => {
+  if (!isRecord(value) || !Array.isArray(value.shards) || !Array.isArray(value.unlockedTechs)) {
+    throw new Error("Invalid save state growth fields");
+  }
+  const migrated = migrateV1(value);
+  return {
+    ...migrated,
+    version: SaveStateVersion.V3,
+    unlockedTechs: value.unlockedTechs.map((tech) => stringValue(tech, "unlocked tech")),
+    shards: value.shards.map((shard) => dynamicShardValue(shard, true)),
   };
 };
 
 export const SAVE_STATE_MIGRATIONS: Record<SaveStateVersion, SaveStateMigration> = {
   [SaveStateVersion.V1]: migrateV1,
   [SaveStateVersion.V2]: migrateV2,
+  [SaveStateVersion.V3]: migrateV3,
 };
 
 const isSaveStateVersion = (value: unknown): value is SaveStateVersion => {
@@ -163,12 +185,14 @@ export const loadSaveState = (serialized: string | null): SaveState | null => {
 
 export const saveStateForSimulation = (sim: Simulation): SaveState => {
   const shards = [...sim.shards.values()]
-    .filter((shard) => !sim.broken.has(shard.key) && (shard.health < shard.maxHealth || shard.impacts.length > 0))
+    .filter((shard) => shard.growing || (!sim.broken.has(shard.key) && (shard.health < shard.maxHealth || shard.impacts.length > 0)))
     .map((shard) => ({
       key: shard.key,
       health: shard.health,
       maxHealth: shard.maxHealth,
       healthUpdatedAt: shard.healthUpdatedAt,
+      growth: shard.growth,
+      growing: shard.growing,
       impacts: shard.impacts.map((impact) => ({ ...impact })),
     }));
 

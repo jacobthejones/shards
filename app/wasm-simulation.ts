@@ -10,7 +10,7 @@ import {
 import type { SaveState } from "./save-state";
 import { TECH_IDS, type TechId } from "./tech-tree";
 
-export const WASM_RUNTIME_VERSION = 4;
+export const WASM_RUNTIME_VERSION = 5;
 
 type WasmExports = {
   initialize_real_simulation: (seed: number, fieldSeed: number, balls: number) => void;
@@ -22,6 +22,9 @@ type WasmExports = {
   set_tech_chosen_one: (enabled: number) => number;
   set_tech_chosen_one_state: (enabled: number) => void;
   get_tech_chosen_one: () => number;
+  set_tech_new_growth: (enabled: number) => number;
+  set_tech_new_growth_state: (enabled: number) => void;
+  get_tech_new_growth: () => number;
   set_tech_conduction: (enabled: number) => number;
   set_tech_conduction_state: (enabled: number) => void;
   get_tech_conduction: () => number;
@@ -32,6 +35,7 @@ type WasmExports = {
   set_ball_state: (index: number, x: number, y: number, vx: number, vy: number, cooldown: number) => void;
   set_all_shards_broken: (broken: number) => void;
   set_shard_broken: (shard: number, broken: number) => void;
+  set_shard_growth: (shard: number, growth: number, growing: number) => void;
   set_shard_health: (shard: number, health: number, updatedAt: number) => void;
   clear_shard_impacts: (shard: number) => void;
   set_shard_impact: (shard: number, impact: number, id: number, x: number, y: number, inwardX: number, inwardY: number, strength: number) => void;
@@ -62,6 +66,8 @@ type WasmExports = {
   is_shard_broken: (index: number) => number;
   get_shard_health: (index: number) => number;
   get_shard_health_updated_at: (index: number) => number;
+  get_shard_growth: (index: number) => number;
+  get_shard_growing: (index: number) => number;
   get_shard_impact_count: (index: number) => number;
   get_shard_impact_id: (shard: number, impact: number) => number;
   get_shard_impact_x: (shard: number, impact: number) => number;
@@ -112,11 +118,13 @@ export class WasmSimulation {
   private staticShards: StaticShardState[] = [];
   private shardIndexByKey = new Map<string, number>();
   private damagedShardIndices = new Set<number>();
+  private dirtyBrokenShardIndices = new Set<number>();
   private brokenShardIndices = new Set<number>();
   private paused = true;
   private awaitingStart = true;
   private nextArrowId = 1;
   private chosenOneUnlocked = false;
+  private newGrowthUnlocked = false;
   private resonanceUnlocked = false;
   private conductionUnlocked = false;
 
@@ -127,9 +135,11 @@ export class WasmSimulation {
     }));
     this.nextArrowId = ballCount;
     this.chosenOneUnlocked = false;
+    this.newGrowthUnlocked = false;
     this.resonanceUnlocked = false;
     this.conductionUnlocked = false;
     this.damagedShardIndices.clear();
+    this.dirtyBrokenShardIndices.clear();
     this.brokenShardIndices.clear();
   }
 
@@ -185,6 +195,8 @@ export class WasmSimulation {
       health: this.wasm.get_shard_health(index),
       maxHealth: 1,
       healthUpdatedAt: this.wasm.get_shard_health_updated_at(index),
+      growth: this.wasm.get_shard_growth(index),
+      growing: this.wasm.get_shard_growing(index) !== 0,
       impacts: Array.from({ length: impactCount }, (_, impactIndex) => ({
         id: this.wasm.get_shard_impact_id(index, impactIndex),
         x: this.wasm.get_shard_impact_x(index, impactIndex),
@@ -198,14 +210,22 @@ export class WasmSimulation {
 
   private readDynamicShards(): DynamicShardState[] {
     const states: DynamicShardState[] = [];
-    [...this.damagedShardIndices].forEach((index) => {
-      if (this.brokenShardIndices.has(index)) {
+    new Set([...this.damagedShardIndices, ...this.dirtyBrokenShardIndices]).forEach((index) => {
+      const dirtyBroken = this.dirtyBrokenShardIndices.has(index);
+      if (this.brokenShardIndices.has(index) && this.wasm.is_shard_broken(index) === 0) {
+        this.brokenShardIndices.delete(index);
+      }
+      if (this.brokenShardIndices.has(index) && !dirtyBroken && this.wasm.get_shard_growing(index) === 0) {
         this.damagedShardIndices.delete(index);
         return;
       }
       const state = this.readDynamicShard(index);
-      if (state.health >= state.maxHealth && state.impacts.length === 0) this.damagedShardIndices.delete(index);
-      else states.push(state);
+      if (dirtyBroken) {
+        states.push(state);
+        this.dirtyBrokenShardIndices.delete(index);
+      } else if (state.health >= state.maxHealth && state.impacts.length === 0 && !state.growing) {
+        this.damagedShardIndices.delete(index);
+      } else states.push(state);
     });
     return states;
   }
@@ -224,6 +244,7 @@ export class WasmSimulation {
       nextArrowId: this.nextArrowId,
       nextImpactId: this.wasm.get_next_impact_id(),
       unlockedTechs: [
+        ...(this.newGrowthUnlocked ? [TECH_IDS.NEW_GROWTH] : []),
         ...(this.chosenOneUnlocked ? [TECH_IDS.CHOSEN_ONE] : []),
         ...(this.resonanceUnlocked ? [TECH_IDS.RESONANCE] : []),
         ...(this.conductionUnlocked ? [TECH_IDS.CONDUCTION] : []),
@@ -240,9 +261,11 @@ export class WasmSimulation {
     this.wasm.set_score(0);
     this.initializeMeta(1);
     this.wasm.set_tech_chosen_one_state(0);
+    this.wasm.set_tech_new_growth_state(0);
     this.wasm.set_tech_resonance_state(0);
     this.wasm.set_tech_conduction_state(0);
     this.resonanceUnlocked = false;
+    this.newGrowthUnlocked = false;
     this.conductionUnlocked = false;
     this.paused = true;
     this.awaitingStart = true;
@@ -257,9 +280,11 @@ export class WasmSimulation {
     this.wasm.set_random_state(save.randomState);
     this.wasm.set_next_impact_id(save.nextImpactId);
     this.chosenOneUnlocked = save.unlockedTechs.includes(TECH_IDS.CHOSEN_ONE);
+    this.newGrowthUnlocked = this.chosenOneUnlocked && save.unlockedTechs.includes(TECH_IDS.NEW_GROWTH);
     this.resonanceUnlocked = save.unlockedTechs.includes(TECH_IDS.RESONANCE);
     this.conductionUnlocked = this.resonanceUnlocked && save.unlockedTechs.includes(TECH_IDS.CONDUCTION);
     this.wasm.set_tech_chosen_one_state(this.chosenOneUnlocked ? 1 : 0);
+    this.wasm.set_tech_new_growth_state(this.newGrowthUnlocked ? 1 : 0);
     this.wasm.set_tech_resonance_state(this.resonanceUnlocked ? 1 : 0);
     this.wasm.set_tech_conduction_state(this.conductionUnlocked ? 1 : 0);
     this.readStaticShards();
@@ -277,7 +302,13 @@ export class WasmSimulation {
     });
     save.shards.forEach((savedShard) => {
       const index = this.shardIndexByKey.get(savedShard.key);
-      if (index === undefined || this.brokenShardIndices.has(index)) return;
+      if (index === undefined) return;
+      if (savedShard.growing) {
+        this.wasm.set_shard_growth(index, savedShard.growth, 1);
+        this.damagedShardIndices.add(index);
+        return;
+      }
+      if (this.brokenShardIndices.has(index)) return;
       this.wasm.set_shard_health(index, savedShard.health, savedShard.healthUpdatedAt);
       this.wasm.clear_shard_impacts(index);
       savedShard.impacts.forEach((impact, impactIndex) => this.wasm.set_shard_impact(
@@ -310,6 +341,11 @@ export class WasmSimulation {
     if (tech === TECH_IDS.CHOSEN_ONE) {
       const changed = this.wasm.set_tech_chosen_one(enabled ? 1 : 0) !== 0;
       if (changed) this.chosenOneUnlocked = enabled;
+      return changed;
+    }
+    if (tech === TECH_IDS.NEW_GROWTH) {
+      const changed = this.wasm.set_tech_new_growth(enabled ? 1 : 0) !== 0;
+      if (changed) this.newGrowthUnlocked = enabled;
       return changed;
     }
     if (tech === TECH_IDS.RESONANCE) {
@@ -361,6 +397,8 @@ export class WasmSimulation {
         this.damagedShardIndices.delete(shardIndex);
         events.push({ type: "break", hue: shard.hue, shardKey: shard.key });
       }
+      if (type === 5) events.push({ type: "growth", hue: shard.hue, shardKey: shard.key });
+      if (type === 6) this.dirtyBrokenShardIndices.add(shardIndex);
     }
     return events;
   }

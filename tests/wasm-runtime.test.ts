@@ -89,6 +89,95 @@ test("The Chosen One purchase and refund use the original ball", async () => {
   assert.equal(wasm.get_score(), 10_000);
 });
 
+test("New Growth requires The Chosen One and refunds its full cost", async () => {
+  const wasm = await loadRuntime();
+  wasm.initialize_real_simulation(7, 77, 1);
+  wasm.set_score(25_000);
+  assert.equal(wasm.set_tech_new_growth(1), 0);
+  assert.equal(wasm.get_tech_new_growth(), 0);
+
+  wasm.set_tech_chosen_one_state(1);
+  assert.equal(wasm.set_tech_new_growth(1), 1);
+  assert.equal(wasm.get_tech_new_growth(), 1);
+  assert.equal(wasm.get_score(), 0);
+  assert.equal(wasm.set_tech_chosen_one(0), 0);
+  assert.equal(wasm.set_tech_new_growth(0), 1);
+  assert.equal(wasm.get_tech_new_growth(), 0);
+  assert.equal(wasm.get_score(), 25_000);
+});
+
+test("New Growth starts only when the chosen ball sweeps through an empty cell", async () => {
+  const wasm = await loadRuntime();
+  wasm.initialize_real_simulation(7, 77, 2);
+  wasm.set_tech_chosen_one_state(1);
+  wasm.set_tech_new_growth_state(1);
+  wasm.set_all_shards_broken(1);
+  wasm.set_ball_state(0, 0, 0, -1.4366976021418008, 0, 0);
+  wasm.set_ball_state(1, 100, 100, 0, 0, 0);
+
+  wasm.step_real_simulation(1);
+
+  const centerShard = centerShardIndexFor(wasm);
+  let growthEvents = 0;
+  for (let index = 0; index < wasm.get_event_count(); index += 1) {
+    if (wasm.get_event_type(index) === 5) growthEvents += 1;
+  }
+  assert.ok(growthEvents > 0);
+  assert.equal(wasm.is_shard_broken(centerShard), 1);
+  assert.equal(wasm.get_shard_growing(centerShard), 1);
+  assert.ok(wasm.get_shard_growth(centerShard) > 0);
+
+  wasm.set_ball_state(0, 100, 100, 0, 0, 0);
+  wasm.step_real_simulation(60);
+  assert.ok(wasm.get_shard_growth(centerShard) > 0.009);
+  assert.ok(wasm.get_shard_growth(centerShard) < 0.012);
+
+  wasm.step_real_simulation(6_000);
+  assert.equal(wasm.is_shard_broken(centerShard), 0);
+  assert.equal(wasm.get_shard_growing(centerShard), 0);
+  assert.equal(wasm.get_shard_growth(centerShard), 0);
+  assert.equal(wasm.get_shard_health(centerShard), 1);
+});
+
+test("A ball passing through a growing cell resets it without reflecting", async () => {
+  const wasm = await loadRuntime();
+  wasm.initialize_real_simulation(7, 77, 2);
+  wasm.set_tech_chosen_one_state(1);
+  wasm.set_tech_new_growth_state(1);
+  wasm.set_all_shards_broken(1);
+  wasm.set_ball_state(0, 0, 0, -1.4366976021418008, 0, 0);
+  wasm.set_ball_state(1, 100, 100, 0, 0, 0);
+  wasm.step_real_simulation(1);
+  const centerShard = centerShardIndexFor(wasm);
+
+  wasm.set_ball_state(0, 100, 100, 0, 0, 0);
+  wasm.set_ball_state(1, 0, 0, -1.4366976021418008, 0, 0);
+  const beforeX = wasm.get_ball_x(1);
+  wasm.step_real_simulation(1);
+
+  assert.equal(wasm.get_shard_growing(centerShard), 0);
+  assert.equal(wasm.is_shard_broken(centerShard), 1);
+  assert.equal(wasm.get_shard_growth(centerShard), 0);
+  assert.ok(wasm.get_ball_x(1) < beforeX);
+  assert.equal(Array.from({ length: wasm.get_event_count() }, (_, index) => wasm.get_event_type(index)).includes(1), false);
+});
+
+test("Only the chosen ball can start New Growth", async () => {
+  const wasm = await loadRuntime();
+  wasm.initialize_real_simulation(7, 77, 2);
+  wasm.set_tech_chosen_one_state(1);
+  wasm.set_tech_new_growth_state(1);
+  wasm.set_all_shards_broken(1);
+  wasm.set_ball_state(0, 100, 100, 0, 0, 0);
+  wasm.set_ball_state(1, 0, 0, -1.4366976021418008, 0, 0);
+  wasm.step_real_simulation(1);
+
+  assert.equal(wasm.get_shard_growing(centerShardIndexFor(wasm)), 0);
+  for (let index = 0; index < wasm.get_event_count(); index += 1) {
+    assert.notEqual(wasm.get_event_type(index), 5);
+  }
+});
+
 test("The Chosen One empowers only the original ball and makes its direct hit break", async () => {
   const wasm = await loadRuntime();
   wasm.initialize_real_simulation(7, 77, 2);

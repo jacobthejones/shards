@@ -1,4 +1,5 @@
 export const TECH_IDS = {
+  NEW_GROWTH: "new-growth",
   CHOSEN_ONE: "chosen-one",
   RESONANCE: "resonance",
   CONDUCTION: "conduction",
@@ -9,8 +10,9 @@ export type TechId = typeof TECH_IDS[keyof typeof TECH_IDS];
 export const RESONANCE_COST = 10_000;
 export const CONDUCTION_COST = 25_000;
 export const CHOSEN_ONE_COST = 10_000;
+export const NEW_GROWTH_COST = 25_000;
 
-export type TechIcon = "chosen-one" | "resonance" | "conduction";
+export type TechIcon = "new-growth" | "chosen-one" | "resonance" | "conduction";
 
 export type TechDefinition = {
   id: TechId;
@@ -22,6 +24,14 @@ export type TechDefinition = {
 };
 
 export const TECH_TREE: TechDefinition[] = [
+  {
+    id: TECH_IDS.NEW_GROWTH,
+    title: "New Growth",
+    description: "The chosen ball coaxes empty shards back into existence as it passes through them.",
+    icon: "new-growth",
+    cost: NEW_GROWTH_COST,
+    dependsOn: [TECH_IDS.CHOSEN_ONE],
+  },
   {
     id: TECH_IDS.CHOSEN_ONE,
     title: "The Chosen One",
@@ -49,7 +59,7 @@ export const TECH_TREE: TechDefinition[] = [
 ];
 
 export const TECH_TREE_BRANCHES: TechId[][] = [
-  [TECH_IDS.CHOSEN_ONE],
+  [TECH_IDS.NEW_GROWTH, TECH_IDS.CHOSEN_ONE],
   [TECH_IDS.CONDUCTION, TECH_IDS.RESONANCE],
 ];
 

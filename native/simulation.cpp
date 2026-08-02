@@ -26,11 +26,12 @@
 #define RESONANCE_COST 10000.0
 #define CONDUCTION_COST 25000.0
 #define CHOSEN_ONE_COST 10000.0
+#define NEW_GROWTH_COST 25000.0
 #define RESONANCE_SPLASH_DAMAGE 0.1
 #define CONDUCTION_SPLASH_DAMAGE 0.05
 #define CHOSEN_ONE_DAMAGE_MULTIPLIER 5.0
 #define CHOSEN_BALL_INDEX 0
-#define SIMULATION_RUNTIME_VERSION 4
+#define SIMULATION_RUNTIME_VERSION 5
 #define BOUNCE_JITTER_RADIANS (0.02 * 3.1415926535897932384626433832795 / 180.0)
 #define COLLISION_SEPARATION 0.004
 #define MAX_COLLISIONS_PER_STEP 4
@@ -60,6 +61,8 @@ static double SHARD_SX[MAX_SHARDS];
 static double SHARD_SY[MAX_SHARDS];
 static double SHARD_HEALTH[MAX_SHARDS];
 static double SHARD_HEALTH_UPDATED_AT[MAX_SHARDS];
+static double SHARD_GROWTH[MAX_SHARDS];
+static int32_t SHARD_GROWING[MAX_SHARDS];
 static double SHARD_HUE[MAX_SHARDS];
 static double SHARD_SEED[MAX_SHARDS];
 static int32_t SHARD_BROKEN[MAX_SHARDS];
@@ -91,6 +94,7 @@ static uint32_t rng_state;
 static double current_field_seed;
 static int32_t next_impact_id;
 static int32_t chosen_one_unlocked;
+static int32_t new_growth_unlocked;
 static int32_t resonance_unlocked;
 static int32_t conduction_unlocked;
 static int32_t event_count;
@@ -269,6 +273,78 @@ static int32_t circle_intersects_polygon(double x, double y, double radius, int3
   return 0;
 }
 
+static double point_segment_distance_squared(double x, double y, double ax, double ay, double bx, double by) {
+  double closest_x, closest_y;
+  closest_point_on_segment(x, y, ax, ay, bx, by, &closest_x, &closest_y);
+  double dx = x - closest_x;
+  double dy = y - closest_y;
+  return dx * dx + dy * dy;
+}
+
+static double orientation(double ax, double ay, double bx, double by, double cx, double cy) {
+  return (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
+}
+
+static int32_t point_on_segment(double ax, double ay, double bx, double by, double px, double py) {
+  double min_x = ax < bx ? ax : bx;
+  double max_x = ax > bx ? ax : bx;
+  double min_y = ay < by ? ay : by;
+  double max_y = ay > by ? ay : by;
+  return px >= min_x - 0.000001 && px <= max_x + 0.000001
+    && py >= min_y - 0.000001 && py <= max_y + 0.000001;
+}
+
+static int32_t segments_intersect(
+  double ax, double ay, double bx, double by,
+  double cx, double cy, double dx, double dy
+) {
+  double first = orientation(ax, ay, bx, by, cx, cy);
+  double second = orientation(ax, ay, bx, by, dx, dy);
+  double third = orientation(cx, cy, dx, dy, ax, ay);
+  double fourth = orientation(cx, cy, dx, dy, bx, by);
+  int32_t first_opposite = (first > 0.000001 && second < -0.000001) || (first < -0.000001 && second > 0.000001);
+  int32_t second_opposite = (third > 0.000001 && fourth < -0.000001) || (third < -0.000001 && fourth > 0.000001);
+  if (first_opposite && second_opposite) return 1;
+  if (first >= -0.000001 && first <= 0.000001 && point_on_segment(ax, ay, bx, by, cx, cy)) return 1;
+  if (second >= -0.000001 && second <= 0.000001 && point_on_segment(ax, ay, bx, by, dx, dy)) return 1;
+  if (third >= -0.000001 && third <= 0.000001 && point_on_segment(cx, cy, dx, dy, ax, ay)) return 1;
+  if (fourth >= -0.000001 && fourth <= 0.000001 && point_on_segment(cx, cy, dx, dy, bx, by)) return 1;
+  return 0;
+}
+
+static double segment_distance_squared(
+  double ax, double ay, double bx, double by,
+  double cx, double cy, double dx, double dy
+) {
+  if (segments_intersect(ax, ay, bx, by, cx, cy, dx, dy)) return 0.0;
+  double distance = point_segment_distance_squared(ax, ay, cx, cy, dx, dy);
+  double candidate = point_segment_distance_squared(bx, by, cx, cy, dx, dy);
+  if (candidate < distance) distance = candidate;
+  candidate = point_segment_distance_squared(cx, cy, ax, ay, bx, by);
+  if (candidate < distance) distance = candidate;
+  candidate = point_segment_distance_squared(dx, dy, ax, ay, bx, by);
+  if (candidate < distance) distance = candidate;
+  return distance;
+}
+
+static int32_t segment_intersects_polygon(
+  double x, double y, double next_x, double next_y, double radius, int32_t shard
+) {
+  if (point_in_polygon(x, y, shard) || point_in_polygon(next_x, next_y, shard)) return 1;
+  double radius_squared = radius * radius;
+  int32_t count = POINT_COUNT[shard];
+  int32_t start = shard * MAX_CELL_POINTS;
+  for (int32_t index = 0; index < count; index += 1) {
+    int32_t next = (index + 1) % count;
+    if (segment_distance_squared(
+      x, y, next_x, next_y,
+      POINT_X[start + index], POINT_Y[start + index],
+      POINT_X[start + next], POINT_Y[start + next]
+    ) <= radius_squared) return 1;
+  }
+  return 0;
+}
+
 static void mark_shard_damaged(int32_t shard) {
   if (SHARD_DAMAGED[shard]) return;
   SHARD_DAMAGED[shard] = 1;
@@ -298,6 +374,34 @@ static void add_impact(int32_t shard, double x, double y, double inward_x, doubl
   } else {
     SHARD_IMPACT_STRENGTH[start + MAX_IMPACTS - 1] += strength;
   }
+}
+
+static void begin_shard_growth(int32_t shard) {
+  if (!SHARD_BROKEN[shard] || SHARD_GROWING[shard]) return;
+  SHARD_GROWTH[shard] = 0.0;
+  SHARD_GROWING[shard] = 1;
+  mark_shard_damaged(shard);
+  record_event(5, shard, shard);
+}
+
+static void reset_shard_growth(int32_t shard) {
+  if (!SHARD_GROWING[shard]) return;
+  SHARD_GROWTH[shard] = 0.0;
+  SHARD_GROWING[shard] = 0;
+  mark_shard_damaged(shard);
+  record_event(6, shard, shard);
+}
+
+static void refresh_shard_growth(int32_t shard) {
+  if (!SHARD_GROWING[shard]) return;
+  SHARD_GROWTH[shard] += SHARD_REGENERATION_RATE * FIXED_TIMESTEP;
+  if (SHARD_GROWTH[shard] < 1.0) return;
+  SHARD_GROWTH[shard] = 0.0;
+  SHARD_GROWING[shard] = 0;
+  SHARD_BROKEN[shard] = 0;
+  SHARD_HEALTH[shard] = SHARD_MAX_HEALTH;
+  SHARD_HEALTH_UPDATED_AT[shard] = simulation_time;
+  SHARD_IMPACT_COUNT[shard] = 0;
 }
 
 static void refresh_shard_health(int32_t shard) {
@@ -338,7 +442,9 @@ static void refresh_damaged_shards(void) {
   while (index < damaged_shard_count) {
     int32_t shard = DAMAGED_SHARDS[index];
     refresh_shard_health(shard);
-    if (SHARD_BROKEN[shard] || (SHARD_IMPACT_COUNT[shard] == 0 && SHARD_HEALTH[shard] >= 1.0)) {
+    refresh_shard_growth(shard);
+    if ((!SHARD_BROKEN[shard] && !SHARD_GROWING[shard] && SHARD_IMPACT_COUNT[shard] == 0 && SHARD_HEALTH[shard] >= 1.0)
+      || (SHARD_BROKEN[shard] && !SHARD_GROWING[shard])) {
       SHARD_DAMAGED[shard] = 0;
       damaged_shard_count -= 1;
       DAMAGED_SHARDS[index] = DAMAGED_SHARDS[damaged_shard_count];
@@ -519,6 +625,8 @@ static void initialize_field(double field_seed) {
       CENTER_Y[shard] = SHARD_SY[shard];
       SHARD_HEALTH[shard] = SHARD_MAX_HEALTH;
       SHARD_HEALTH_UPDATED_AT[shard] = 0.0;
+      SHARD_GROWTH[shard] = 0.0;
+      SHARD_GROWING[shard] = 0;
       SHARD_SEED[shard] = seeded_hash((double)gx + 4.8, (double)gy - 2.3, field_seed);
       SHARD_HUE[shard] = 162.0 + seeded_hash((double)gx + 4.8, (double)gy - 2.3, field_seed) * 72.0 + sqrt((double)gx * gx + (double)gy * gy) * 2.2;
       SHARD_BROKEN[shard] = circle_intersects_polygon(0.0, 0.0, BASE_BALL_RADIUS, shard);
@@ -542,6 +650,7 @@ static void initialize_balls(uint32_t seed, double field_seed_override, int32_t 
   simulation_time = 0.0;
   next_impact_id = 1;
   chosen_one_unlocked = 0;
+  new_growth_unlocked = 0;
   resonance_unlocked = 0;
   conduction_unlocked = 0;
   event_count = 0;
@@ -760,6 +869,27 @@ static Collision collision_for(double x, double y, double next_x, double next_y,
   return best;
 }
 
+static void process_growth_path(int32_t ball, double x, double y, double next_x, double next_y) {
+  if (!new_growth_unlocked && damaged_shard_count == 0) return;
+  int32_t min_x = (int32_t)floor(x < next_x ? x : next_x) - 1;
+  int32_t max_x = (int32_t)floor(x > next_x ? x : next_x) + 1;
+  int32_t min_y = (int32_t)floor(y < next_y ? y : next_y) - 1;
+  int32_t max_y = (int32_t)floor(y > next_y ? y : next_y) + 1;
+  int32_t can_start = new_growth_unlocked && ball == CHOSEN_BALL_INDEX;
+  for (int32_t gy = min_y; gy <= max_y; gy += 1) {
+    for (int32_t gx = min_x; gx <= max_x; gx += 1) {
+      if (!in_grid(gx, gy)) continue;
+      int32_t shard = GRID[grid_index(gx, gy)];
+      if (shard < 0 || !segment_intersects_polygon(x, y, next_x, next_y, BASE_BALL_RADIUS, shard)) continue;
+      if (SHARD_GROWING[shard]) {
+        reset_shard_growth(shard);
+      } else if (can_start && SHARD_BROKEN[shard]) {
+        begin_shard_growth(shard);
+      }
+    }
+  }
+}
+
 static void step_simulation(void) {
   simulation_time += FIXED_TIMESTEP;
   recent_break_rate *= exp(-FIXED_TIMESTEP / RECENT_BREAK_RATE_TIME_CONSTANT_SECONDS);
@@ -772,6 +902,7 @@ static void step_simulation(void) {
     while (remaining > 0.000001 && collision_count < MAX_COLLISIONS_PER_STEP) {
       double next_x = BALL_X[ball] + BALL_VX[ball] * remaining;
       double next_y = BALL_Y[ball] + BALL_VY[ball] * remaining;
+      process_growth_path(ball, BALL_X[ball], BALL_Y[ball], next_x, next_y);
       Collision collision = collision_for(BALL_X[ball], BALL_Y[ball], next_x, next_y, BASE_BALL_RADIUS);
       if (!collision.valid) {
         BALL_X[ball] = next_x;
@@ -876,6 +1007,10 @@ __attribute__((export_name("set_tech_chosen_one_state"))) void set_tech_chosen_o
   chosen_one_unlocked = enabled ? 1 : 0;
 }
 
+__attribute__((export_name("set_tech_new_growth_state"))) void set_tech_new_growth_state(int32_t enabled) {
+  new_growth_unlocked = enabled && chosen_one_unlocked ? 1 : 0;
+}
+
 __attribute__((export_name("set_tech_conduction_state"))) void set_tech_conduction_state(int32_t enabled) {
   conduction_unlocked = enabled && resonance_unlocked ? 1 : 0;
 }
@@ -888,8 +1023,22 @@ __attribute__((export_name("set_tech_chosen_one"))) int32_t set_tech_chosen_one(
     return 1;
   }
   if (!chosen_one_unlocked) return 0;
+  if (new_growth_unlocked) return 0;
   score += CHOSEN_ONE_COST;
   chosen_one_unlocked = 0;
+  return 1;
+}
+
+__attribute__((export_name("set_tech_new_growth"))) int32_t set_tech_new_growth(int32_t enabled) {
+  if (enabled) {
+    if (!chosen_one_unlocked || new_growth_unlocked || score < NEW_GROWTH_COST) return 0;
+    score -= NEW_GROWTH_COST;
+    new_growth_unlocked = 1;
+    return 1;
+  }
+  if (!new_growth_unlocked) return 0;
+  score += NEW_GROWTH_COST;
+  new_growth_unlocked = 0;
   return 1;
 }
 
@@ -937,10 +1086,28 @@ __attribute__((export_name("set_ball_state"))) void set_ball_state(int32_t index
   BALL_X[index] = x; BALL_Y[index] = y; BALL_VX[index] = vx; BALL_VY[index] = vy; BALL_HIT_COOLDOWN[index] = cooldown;
 }
 __attribute__((export_name("set_all_shards_broken"))) void set_all_shards_broken(int32_t broken) {
-  for (int32_t index = 0; index < shard_count; index += 1) SHARD_BROKEN[index] = broken ? 1 : 0;
+  for (int32_t index = 0; index < shard_count; index += 1) {
+    SHARD_BROKEN[index] = broken ? 1 : 0;
+    if (broken) {
+      SHARD_GROWTH[index] = 0.0;
+      SHARD_GROWING[index] = 0;
+    }
+  }
 }
 __attribute__((export_name("set_shard_broken"))) void set_shard_broken(int32_t shard, int32_t broken) {
-  if (shard >= 0 && shard < shard_count) SHARD_BROKEN[shard] = broken ? 1 : 0;
+  if (shard >= 0 && shard < shard_count) {
+    SHARD_BROKEN[shard] = broken ? 1 : 0;
+    if (broken) {
+      SHARD_GROWTH[shard] = 0.0;
+      SHARD_GROWING[shard] = 0;
+    }
+  }
+}
+__attribute__((export_name("set_shard_growth"))) void set_shard_growth(int32_t shard, double growth, int32_t growing) {
+  if (shard < 0 || shard >= shard_count) return;
+  SHARD_GROWTH[shard] = growth < 0.0 ? 0.0 : growth > 1.0 ? 1.0 : growth;
+  SHARD_GROWING[shard] = growing && SHARD_BROKEN[shard] ? 1 : 0;
+  if (SHARD_GROWING[shard]) mark_shard_damaged(shard);
 }
 __attribute__((export_name("set_shard_health"))) void set_shard_health(int32_t shard, double health, double updated_at) {
   if (shard < 0 || shard >= shard_count) return;
@@ -961,6 +1128,7 @@ __attribute__((export_name("set_shard_impact"))) void set_shard_impact(int32_t s
 
 __attribute__((export_name("get_score"))) double get_score(void) { return score; }
 __attribute__((export_name("get_tech_chosen_one"))) int32_t get_tech_chosen_one(void) { return chosen_one_unlocked; }
+__attribute__((export_name("get_tech_new_growth"))) int32_t get_tech_new_growth(void) { return new_growth_unlocked; }
 __attribute__((export_name("get_tech_resonance"))) int32_t get_tech_resonance(void) { return resonance_unlocked; }
 __attribute__((export_name("get_tech_conduction"))) int32_t get_tech_conduction(void) { return conduction_unlocked; }
 __attribute__((export_name("get_total_hits"))) int32_t get_total_hits(void) { return total_hits; }
@@ -989,6 +1157,8 @@ __attribute__((export_name("get_shard_point_y"))) double get_shard_point_y(int32
 __attribute__((export_name("is_shard_broken"))) int32_t is_shard_broken(int32_t index) { return index >= 0 && index < shard_count ? SHARD_BROKEN[index] : 0; }
 __attribute__((export_name("get_shard_health"))) double get_shard_health(int32_t index) { return index >= 0 && index < shard_count ? SHARD_HEALTH[index] : 0.0; }
 __attribute__((export_name("get_shard_health_updated_at"))) double get_shard_health_updated_at(int32_t index) { return index >= 0 && index < shard_count ? SHARD_HEALTH_UPDATED_AT[index] : 0.0; }
+__attribute__((export_name("get_shard_growth"))) double get_shard_growth(int32_t index) { return index >= 0 && index < shard_count ? SHARD_GROWTH[index] : 0.0; }
+__attribute__((export_name("get_shard_growing"))) int32_t get_shard_growing(int32_t index) { return index >= 0 && index < shard_count ? SHARD_GROWING[index] : 0; }
 __attribute__((export_name("get_shard_impact_count"))) int32_t get_shard_impact_count(int32_t shard) { return shard >= 0 && shard < shard_count ? SHARD_IMPACT_COUNT[shard] : 0; }
 __attribute__((export_name("get_shard_impact_id"))) int32_t get_shard_impact_id(int32_t shard, int32_t impact) { return shard >= 0 && shard < shard_count && impact >= 0 && impact < SHARD_IMPACT_COUNT[shard] ? SHARD_IMPACT_ID[shard * MAX_IMPACTS + impact] : 0; }
 __attribute__((export_name("get_shard_impact_x"))) double get_shard_impact_x(int32_t shard, int32_t impact) { return shard >= 0 && shard < shard_count && impact >= 0 && impact < SHARD_IMPACT_COUNT[shard] ? SHARD_IMPACT_X[shard * MAX_IMPACTS + impact] : 0.0; }
