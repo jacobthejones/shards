@@ -83,8 +83,6 @@ button:focus-visible {
 .game-brand,
 .game-actions,
 .lumen-readout,
-.readout-heading,
-.readout-sub,
 .upgrade-card,
 .sound-button,
 .game-state {
@@ -128,8 +126,6 @@ button:focus-visible {
 
 .brand-copy span,
 .lumen-readout span,
-.readout-heading,
-.readout-sub,
 .corner-note,
 .game-state,
 .upgrade-card small {
@@ -255,35 +251,8 @@ button:focus-visible {
   left: 32px;
   display: flex;
   align-items: flex-end;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 22px;
-}
-
-.field-readout {
-  width: min(290px, 28vw);
-  padding: 15px 16px 13px;
-  border-left: 1px solid var(--teal);
-  background: rgba(5, 18, 24, 0.55);
-  backdrop-filter: blur(10px);
-}
-
-.readout-heading {
-  justify-content: space-between;
-  color: var(--muted);
-}
-
-.readout-heading strong {
-  color: var(--teal);
-  font-size: 10px;
-  font-weight: 500;
-}
-
-.readout-sub {
-  justify-content: space-between;
-  gap: 10px;
-  color: var(--muted-soft);
-  font-size: 8px;
-  letter-spacing: 0.1em;
 }
 
 .upgrade-dock {
@@ -366,7 +335,9 @@ button:focus-visible {
 @media (max-width: 760px) {
   .game-topbar { padding: 19px 17px; }
   .game-state { top: 76px; left: 18px; }
-  .lumen-readout { display: none; }
+  .game-actions { gap: 6px; }
+  .lumen-readout { gap: 6px; padding-right: 7px; padding-left: 7px; }
+  .sound-button { width: 32px; padding: 0; justify-content: center; font-size: 0; }
   .bottom-hud {
     right: 17px;
     bottom: 25px;
@@ -375,7 +346,6 @@ button:focus-visible {
     flex-direction: column-reverse;
     gap: 10px;
   }
-  .field-readout { width: min(100%, 320px); }
   .upgrade-dock { width: 100%; }
   .upgrade-card { flex: 1; min-width: 0; padding-right: 7px; }
   .upgrade-card strong { font-size: 8px; letter-spacing: 0.06em; }

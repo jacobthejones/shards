@@ -30,11 +30,10 @@ test("server-renders the shards experience", async () => {
   assert.match(html, /An idle field that breathes back/);
   assert.match(html, /SHARDS/);
   assert.match(html, /Make room for/);
-  assert.match(html, /field motion/);
+  assert.doesNotMatch(html, /field motion|default speed|depth ∞/);
   assert.doesNotMatch(html, /field integrity|integrity-bar/);
   assert.match(html, /upgrade-card/);
   assert.match(html, /Add ball/);
-  assert.match(html, /01(?:<!-- -->)? balls/);
   assert.match(html, /300(?:<!-- -->)? ✦/);
   assert.doesNotMatch(html, /prism tip|dampener/i);
   assert.match(html, /sound/);

@@ -435,11 +435,6 @@ export default function Home() {
       <div className="game-state"><span className="live-dot" /><span>{hud.rate.toFixed(1)} breaks per min</span></div>
 
       <div className="bottom-hud">
-        <div className="field-readout">
-          <div className="readout-heading"><span>field motion</span><strong>{hud.paused ? "held" : "live"}</strong></div>
-          <div className="readout-sub"><span>{String(hud.arrows).padStart(2, "0")} balls</span><span>default speed</span><span>depth ∞ / {String(hud.ring).padStart(2, "0")}</span></div>
-        </div>
-
         <div className="upgrade-dock" aria-label="Upgrades">
           <button className={`upgrade-card ${canBuyArrow ? "available" : ""}`} onClick={buyArrow} disabled={!canBuyArrow}>
             <span className="upgrade-icon ball-glyph">+</span>
