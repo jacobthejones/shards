@@ -205,6 +205,7 @@ export default function Home() {
   };
 
   const resetRun = () => {
+    if (!window.confirm("Reset this run? Your current progress will be lost.")) return;
     const sim = simRef.current;
     if (!sim) return;
     closeAudio(sim);
