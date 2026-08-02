@@ -40,6 +40,16 @@ import {
   type TechDefinition,
   type TechId,
 } from "./tech-tree";
+import {
+  MAX_RENDER_CHUNKS,
+  RENDER_CHUNK_PADDING,
+  RENDER_CHUNK_SIZE,
+  RenderChunkCache,
+  renderChunkKey,
+  renderChunkOriginForCoordinate,
+  renderChunkRangeForCellBounds,
+  renderChunkSignature,
+} from "./render-cache";
 
 type InteractiveWorkerCommand = Exclude<SimulationWorkerCommand, { type: "load" }>;
 type PendingWorkerCommandType = Exclude<InteractiveWorkerCommand["type"], "addBall" | "ping" | "setTech">;
@@ -339,6 +349,14 @@ export default function Home() {
     const metricsEnabled = new URLSearchParams(window.location.search).has("metrics");
     const shardPathCache = new Map<string, Path2D>();
     const fractureCellCache = new Map<string, [number, number][][]>();
+    type ChunkCanvas = HTMLCanvasElement | OffscreenCanvas;
+    type ChunkContext = CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
+    type RenderChunkSurface = {
+      canvas: ChunkCanvas;
+      context: ChunkContext;
+    };
+    const chunkCache = new RenderChunkCache<RenderChunkSurface>(MAX_RENDER_CHUNKS);
+    let chunkRasterScale = 0;
     let cachedBounds: ReturnType<typeof emptyRegionBounds> | null = null;
     let cachedBoundsBrokenCount = -1;
     let cachedBoundsFieldSeed = Number.NaN;
@@ -356,6 +374,8 @@ export default function Home() {
       canvas.width = Math.floor(width * dpr);
       canvas.height = Math.floor(height * dpr);
       context.setTransform(dpr, 0, 0, dpr, 0, 0);
+      chunkCache.clear();
+      chunkRasterScale = 0;
     };
 
     const updateCamera = (elapsedSeconds: number) => {
@@ -438,7 +458,7 @@ export default function Home() {
       return cells;
     };
 
-    const drawShard = (shard: Shard, scale: number) => {
+    const drawShard = (targetContext: ChunkContext, shard: Shard, scale: number) => {
       const path = shardPathFor(shard);
       const health = shard.health / shard.maxHealth;
       const damage = 1 - health;
@@ -446,33 +466,101 @@ export default function Home() {
       const saturation = 22 + (1 - health) * 24;
       const alpha = 0.72 + (1 - health) * 0.22;
 
-      context.fillStyle = `hsla(${shard.hue}, ${saturation}%, ${lightness}%, ${alpha})`;
-      context.fill(path);
+      targetContext.fillStyle = `hsla(${shard.hue}, ${saturation}%, ${lightness}%, ${alpha})`;
+      targetContext.fill(path);
 
       if (shard.impacts.length > 0 && scale > 8) {
-        context.save();
-        context.clip(path);
-        context.strokeStyle = `hsla(${shard.hue + 34}, 42%, 76%, ${0.045 + damage * 0.11})`;
-        context.lineWidth = 0.008;
+        targetContext.save();
+        targetContext.clip(path);
+        targetContext.strokeStyle = `hsla(${shard.hue + 34}, 42%, 76%, ${0.045 + damage * 0.11})`;
+        targetContext.lineWidth = 0.008;
         shard.impacts.forEach((impact) => {
           const fractureCells = fractureCellsFor(shard, impact);
           const intensity = Math.max(0, Math.min(1, impact.strength / 0.19));
-          context.globalAlpha = 0.28 + intensity * 0.72;
+          targetContext.globalAlpha = 0.28 + intensity * 0.72;
           fractureCells.forEach((cell) => {
             if (cell.length < 3) return;
-            context.beginPath();
-            context.moveTo(cell[0][0], cell[0][1]);
-            cell.slice(1).forEach(([pointX, pointY]) => context.lineTo(pointX, pointY));
-            context.closePath();
-            context.stroke();
+            targetContext.beginPath();
+            targetContext.moveTo(cell[0][0], cell[0][1]);
+            cell.slice(1).forEach(([pointX, pointY]) => targetContext.lineTo(pointX, pointY));
+            targetContext.closePath();
+            targetContext.stroke();
           });
         });
-        context.restore();
+        targetContext.restore();
       }
 
-      context.strokeStyle = `hsla(${shard.hue + 18}, 50%, 74%, ${0.08 + (1 - health) * 0.2})`;
-      context.lineWidth = 0.012;
-      context.stroke(path);
+      targetContext.strokeStyle = `hsla(${shard.hue + 18}, 50%, 74%, ${0.08 + (1 - health) * 0.2})`;
+      targetContext.lineWidth = 0.012;
+      targetContext.stroke(path);
+    };
+
+    const createChunkSurface = (): RenderChunkSurface => {
+      const pixelSize = Math.ceil((RENDER_CHUNK_SIZE + RENDER_CHUNK_PADDING * 2) * chunkRasterScale);
+      const chunkCanvas: ChunkCanvas = typeof OffscreenCanvas === "undefined"
+        ? Object.assign(document.createElement("canvas"), { width: pixelSize, height: pixelSize })
+        : new OffscreenCanvas(pixelSize, pixelSize);
+      const chunkContext = chunkCanvas.getContext("2d");
+      if (!chunkContext) throw new Error("Unable to create a 2D chunk render surface");
+      return { canvas: chunkCanvas, context: chunkContext };
+    };
+
+    const drawChunk = (chunkX: number, chunkY: number, scale: number) => {
+      const coordinate = { x: chunkX, y: chunkY };
+      const key = renderChunkKey(coordinate);
+      const origin = renderChunkOriginForCoordinate(coordinate);
+      const shards: Shard[] = [];
+      for (let gy = origin.y; gy < origin.y + RENDER_CHUNK_SIZE; gy += 1) {
+        for (let gx = origin.x; gx < origin.x + RENDER_CHUNK_SIZE; gx += 1) {
+          const shard = sim.shards.get(keyFor(gx, gy));
+          if (shard) shards.push(shard);
+        }
+      }
+      const fracturesVisible = scale > 8;
+      const signature = renderChunkSignature(sim.fieldSeed, fracturesVisible, shards.map((shard) => ({
+        key: shard.key,
+        broken: sim.broken.has(shard.key),
+        health: shard.health,
+        maxHealth: shard.maxHealth,
+        hue: shard.hue,
+        impacts: shard.impacts,
+      })));
+      const surface = chunkCache.getOrCreate(
+        key,
+        signature,
+        createChunkSurface,
+        (chunk) => {
+          const chunkOriginX = origin.x - RENDER_CHUNK_PADDING;
+          const chunkOriginY = origin.y - RENDER_CHUNK_PADDING;
+          chunk.context.setTransform(
+            chunkRasterScale,
+            0,
+            0,
+            chunkRasterScale,
+            -chunkOriginX * chunkRasterScale,
+            -chunkOriginY * chunkRasterScale,
+          );
+          chunk.context.clearRect(
+            chunkOriginX,
+            chunkOriginY,
+            RENDER_CHUNK_SIZE + RENDER_CHUNK_PADDING * 2,
+            RENDER_CHUNK_SIZE + RENDER_CHUNK_PADDING * 2,
+          );
+          chunk.context.globalAlpha = 1;
+          shards.forEach((shard) => {
+            if (sim.broken.has(shard.key)) return;
+            drawShard(chunk.context, shard, scale);
+          });
+        },
+      );
+      return { surface, origin };
+    };
+
+    const ensureChunkRasterScale = (scale: number) => {
+      const requiredScale = Math.max(1, scale * dpr);
+      if (requiredScale <= chunkRasterScale) return;
+      chunkRasterScale = requiredScale;
+      chunkCache.clear();
     };
 
     const drawArrow = (arrow: Arrow) => {
@@ -503,6 +591,7 @@ export default function Home() {
       context.save();
       context.translate(centerX, centerY);
       context.scale(scale, scale);
+      ensureChunkRasterScale(scale);
 
       if (emptyCircleRadiusRef.current > 0) {
         const reverseVignette = context.createRadialGradient(
@@ -527,11 +616,17 @@ export default function Home() {
       const maxCellY = Math.ceil(visibleWorldHalfHeight);
       const minCellX = Math.floor(-visibleWorldHalfWidth);
       const maxCellX = Math.ceil(visibleWorldHalfWidth);
-      for (let gy = minCellY; gy <= maxCellY; gy += 1) {
-        for (let gx = minCellX; gx <= maxCellX; gx += 1) {
-          const shard = sim.shards.get(keyFor(gx, gy));
-          if (!shard || sim.broken.has(shard.key)) continue;
-          drawShard(shard, scale);
+      const visibleChunks = renderChunkRangeForCellBounds(minCellX, maxCellX, minCellY, maxCellY);
+      for (let chunkY = visibleChunks.minY; chunkY <= visibleChunks.maxY; chunkY += 1) {
+        for (let chunkX = visibleChunks.minX; chunkX <= visibleChunks.maxX; chunkX += 1) {
+          const chunk = drawChunk(chunkX, chunkY, scale);
+          context.drawImage(
+            chunk.surface.canvas,
+            chunk.origin.x - RENDER_CHUNK_PADDING,
+            chunk.origin.y - RENDER_CHUNK_PADDING,
+            RENDER_CHUNK_SIZE + RENDER_CHUNK_PADDING * 2,
+            RENDER_CHUNK_SIZE + RENDER_CHUNK_PADDING * 2,
+          );
         }
       }
 
@@ -643,6 +738,7 @@ export default function Home() {
         cachedBounds = null;
         shardPathCache.clear();
         fractureCellCache.clear();
+        chunkCache.clear();
       }
       if (techStateChanged) setUnlockedTechs([...nextUnlockedTechs]);
       sim.arrows = state.arrows.map((arrow) => ({ ...arrow }));

@@ -39,7 +39,7 @@ test("server-renders the shards experience", async () => {
 });
 
 test("keeps the prototype self-contained", async () => {
-  const [page, simulation, worker, wasmSimulation, layout, css, packageJson, saveState, techTree] = await Promise.all([
+  const [page, simulation, worker, wasmSimulation, layout, css, packageJson, saveState, techTree, renderCache] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/simulation.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/simulation.worker.ts", import.meta.url), "utf8"),
@@ -49,6 +49,7 @@ test("keeps the prototype self-contained", async () => {
     readFile(new URL("../package.json", import.meta.url), "utf8"),
     readFile(new URL("../app/save-state.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/tech-tree.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/render-cache.ts", import.meta.url), "utf8"),
   ]);
 
   assert.match(page, /^"use client";/);
@@ -58,6 +59,10 @@ test("keeps the prototype self-contained", async () => {
   assert.match(page, /voice === "resonance"/);
   assert.match(page, /voice: "resonance" \| "conduction"/);
   assert.match(page, /impactVoronoiCellsFor/);
+  assert.match(page, /OffscreenCanvas/);
+  assert.match(page, /RenderChunkCache/);
+  assert.match(page, /drawImage/);
+  assert.match(page, /renderChunkRangeForCellBounds/);
   assert.match(page, /emptyRegionBounds/);
   assert.match(page, /emptyRegionEnclosingCircle/);
   assert.match(page, /shardBreakFrequency/);
@@ -128,4 +133,8 @@ test("keeps the prototype self-contained", async () => {
   assert.match(techTree, /icon: "resonance"/);
   assert.match(techTree, /icon: "conduction"/);
   assert.match(css, /tech-branch-line/);
+  assert.match(renderCache, /RENDER_CHUNK_SIZE = 8/);
+  assert.match(renderCache, /RENDER_CHUNK_PADDING = 1\.25/);
+  assert.match(renderCache, /class RenderChunkCache/);
+  assert.match(renderCache, /renderChunkSignature/);
 });
