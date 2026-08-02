@@ -1,3 +1,5 @@
+import type { SaveState } from "./save-state";
+
 export type Shard = {
   key: string;
   gx: number;
@@ -40,11 +42,15 @@ type CircleCollision = {
   time: number;
 };
 
-export type Random = () => number;
+export type Random = (() => number) & {
+  getState?: () => number;
+  setState?: (state: number) => void;
+};
 
 export type Simulation = {
   shards: Map<string, Shard>;
   broken: Set<string>;
+  fieldSeed: number;
   arrows: Arrow[];
   nextArrowId: number;
   nextImpactId: number;
@@ -57,6 +63,7 @@ export type Simulation = {
   awaitingStart: boolean;
   ballRadius: number;
   random: Random;
+  randomState: number;
   audioEnabled: boolean;
   audioUnlocked: boolean;
   audio: {
@@ -83,6 +90,8 @@ export type StaticShardState = Pick<Shard, "key" | "gx" | "gy" | "sx" | "sy" | "
 export type DynamicShardState = Pick<Shard, "key" | "health" | "maxHealth" | "healthUpdatedAt" | "impacts">;
 
 export type WorkerSimulationState = {
+  fieldSeed: number;
+  randomState: number;
   time: number;
   score: number;
   totalHits: number;
@@ -90,6 +99,8 @@ export type WorkerSimulationState = {
   recentBreakRate: number;
   paused: boolean;
   awaitingStart: boolean;
+  nextArrowId: number;
+  nextImpactId: number;
   arrows: Arrow[];
   broken: string[];
   shards: DynamicShardState[];
@@ -108,7 +119,8 @@ export type SimulationWorkerCommand =
   | { type: "togglePause" }
   | { type: "reset" }
   | { type: "addBall" }
-  | { type: "setBallCount"; count: number };
+  | { type: "setBallCount"; count: number }
+  | { type: "load"; save: SaveState };
 
 export type SimulationWorkerMessage =
   | { type: "ready"; shards: StaticShardState[]; state: WorkerSimulationState }
@@ -146,10 +158,15 @@ const seededHash = (gx: number, gy: number, fieldSeed: number) => {
 
 export const createRng = (seed: number): Random => {
   let state = (Math.floor(seed) >>> 0) || 0x9e3779b9;
-  return () => {
+  const random = (() => {
     state = (Math.imul(state, 1664525) + 1013904223) >>> 0;
     return state / 0x100000000;
+  }) as Random;
+  random.getState = () => state;
+  random.setState = (nextState) => {
+    state = (Math.floor(nextState) >>> 0) || 0x9e3779b9;
   };
+  return random;
 };
 
 const siteFor = (gx: number, gy: number, fieldSeed: number): [number, number] => {
@@ -651,9 +668,13 @@ const createShard = (gx: number, gy: number, fieldSeed: number): Shard => {
   };
 };
 
-export const createSimulation = (seed = Math.floor(Math.random() * 0xffffffff), paused = true): Simulation => {
+export const createSimulation = (
+  seed = Math.floor(Math.random() * 0xffffffff),
+  paused = true,
+  fieldSeedOverride?: number,
+): Simulation => {
   const random = createRng(seed);
-  const fieldSeed = random() * 100000;
+  const fieldSeed = fieldSeedOverride ?? random() * 100000;
   const shards = new Map<string, Shard>();
   for (let gy = -45; gy <= 45; gy += 1) {
     for (let gx = -45; gx <= 45; gx += 1) {
@@ -664,6 +685,7 @@ export const createSimulation = (seed = Math.floor(Math.random() * 0xffffffff), 
   const sim: Simulation = {
     shards,
     broken: cellsIntersectingCircle(shards, 0, 0, BASE_BALL_RADIUS),
+    fieldSeed,
     arrows: [],
     nextArrowId: 1,
     nextImpactId: 1,
@@ -676,6 +698,7 @@ export const createSimulation = (seed = Math.floor(Math.random() * 0xffffffff), 
     awaitingStart: paused,
     ballRadius: BASE_BALL_RADIUS,
     random,
+    randomState: random.getState?.() ?? 0,
     audioEnabled: true,
     audioUnlocked: false,
     audio: null,
@@ -691,6 +714,7 @@ export const createSimulation = (seed = Math.floor(Math.random() * 0xffffffff), 
     hue: 188,
     hitCooldown: 0,
   });
+  sim.randomState = random.getState?.() ?? sim.randomState;
   return sim;
 };
 
@@ -758,7 +782,9 @@ export const stepSimulation = (sim: Simulation, delta: number): SimulationEvent[
       if (velocityAlongNormal < 0) {
         arrow.vx -= 2 * velocityAlongNormal * nx;
         arrow.vy -= 2 * velocityAlongNormal * ny;
-        const jitter = (sim.random() * 2 - 1) * BOUNCE_JITTER_RADIANS;
+        const randomValue = sim.random();
+        sim.randomState = sim.random.getState?.() ?? sim.randomState;
+        const jitter = (randomValue * 2 - 1) * BOUNCE_JITTER_RADIANS;
         const cosine = Math.cos(jitter);
         const sine = Math.sin(jitter);
         const bouncedVx = arrow.vx;
@@ -784,7 +810,9 @@ export const buyBall = (sim: Simulation) => {
   const cost = ballCost(sim);
   if (sim.score < cost) return false;
   const spawnAngle = sim.arrows.length * 2.2 + 0.4;
-  const direction = sim.random() * TAU;
+  const randomValue = sim.random();
+  sim.randomState = sim.random.getState?.() ?? sim.randomState;
+  const direction = randomValue * TAU;
   sim.score -= cost;
   sim.arrows.push({
     id: sim.nextArrowId++,

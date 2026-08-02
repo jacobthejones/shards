@@ -11,7 +11,7 @@
     "start": "vinext start",
     "typecheck": "tsc --noEmit",
     "test": "npm run build && node --test tests/rendered-html.test.mjs && npm run test:physics",
-    "test:physics": "node --import tsx --test tests/simulation.test.ts",
+    "test:physics": "node --import tsx --test tests/simulation.test.ts tests/save-state.test.ts",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
     "balance": "node --import tsx scripts/headless-balance.ts",
     "check-voronoi": "node --import tsx scripts/check-voronoi-overlap.ts"

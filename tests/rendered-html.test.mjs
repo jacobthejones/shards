@@ -61,13 +61,16 @@ test("keeps the prototype self-contained", async () => {
   assert.match(page, /emptyRegionEnclosingCircle/);
   assert.match(page, /shardBreakFrequency/);
   assert.match(page, /ballCost/);
+  assert.match(page, /SAVE_STATE_INTERVAL_MS/);
+  assert.match(page, /localStorage/);
+  assert.match(page, /serializeSaveState/);
   assert.match(page, /Support the project/);
   assert.match(page, /Send 25¢ to support the project/);
   assert.match(page, /paypal\.me\/jacobthejones\/0\.25USD/);
   assert.match(page, /https:\/\/venmo\.com\/u\/jacobthejones/);
   assert.doesNotMatch(page, /Math\.pow\(1\.2/);
   assert.match(page, /awaitingStart/);
-  assert.doesNotMatch(page, /setInterval|130\.81|174\.61/);
+  assert.doesNotMatch(page, /130\.81|174\.61/);
   assert.doesNotMatch(page, /spawnSparks|sparks/);
   assert.doesNotMatch(page, /holeRadius|setLineDash/);
   assert.match(page, /ballRadius/);
@@ -84,6 +87,8 @@ test("keeps the prototype self-contained", async () => {
   assert.match(simulation, /const SHARD_MAX_HEALTH = 1/);
   assert.match(simulation, /const BASE_HIT_DAMAGE = 0\.2/);
   assert.match(simulation, /const SHARD_REGENERATION_RATE = 0\.01/);
+  assert.match(simulation, /fieldSeed/);
+  assert.match(simulation, /randomState/);
   assert.match(simulation, /sim\.score \+= 1/);
   assert.match(simulation, /sim\.score \+= 100/);
   assert.match(simulation, /recentBreakRate/);
@@ -102,6 +107,7 @@ test("keeps the prototype self-contained", async () => {
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
   assert.match(worker, /self\.onmessage/);
   assert.match(worker, /case "ping"/);
+  assert.match(worker, /case "load"/);
   assert.match(worker, /sim\.score = ballCost\(sim\)/);
 });
 

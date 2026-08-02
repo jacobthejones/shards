@@ -12,6 +12,7 @@ import {
   type WorkerMetrics,
   type WorkerSimulationState,
 } from "./simulation";
+import { simulationFromSaveState } from "./save-state";
 
 let sim = createSimulation();
 let accumulator = 0;
@@ -27,6 +28,8 @@ const post = (message: SimulationWorkerMessage) => {
 };
 
 const stateFor = (shards: DynamicShardState[] = []): WorkerSimulationState => ({
+  fieldSeed: sim.fieldSeed,
+  randomState: sim.randomState,
   time: sim.time,
   score: sim.score,
   totalHits: sim.totalHits,
@@ -34,6 +37,8 @@ const stateFor = (shards: DynamicShardState[] = []): WorkerSimulationState => ({
   recentBreakRate: sim.recentBreakRate,
   paused: sim.paused,
   awaitingStart: sim.awaitingStart,
+  nextArrowId: sim.nextArrowId,
+  nextImpactId: sim.nextImpactId,
   arrows: sim.arrows.map((arrow) => ({ ...arrow })),
   broken: [...sim.broken],
   shards,
@@ -84,7 +89,7 @@ const postReady = () => {
       seed: shard.seed,
       fieldSeed: shard.fieldSeed,
     })),
-    state: stateFor(),
+    state: stateFor(refreshDamagedShards()),
   });
 };
 
@@ -155,6 +160,14 @@ self.onmessage = (event: MessageEvent<SimulationWorkerCommand>) => {
       accumulator = 0;
       lastWallTime = performance.now();
       damagedShardKeys.clear();
+      postReady();
+      break;
+    case "load":
+      sim = simulationFromSaveState(event.data.save);
+      accumulator = 0;
+      lastWallTime = performance.now();
+      damagedShardKeys.clear();
+      event.data.save.shards.forEach((shard) => damagedShardKeys.add(shard.key));
       postReady();
       break;
     case "addBall":
