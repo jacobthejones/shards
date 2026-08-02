@@ -46,6 +46,9 @@ export type Simulation = {
   audioUnlocked: boolean;
   audio: {
     context: AudioContext;
+    masterGain: GainNode;
+    limiter: DynamicsCompressorNode;
+    activeVoices: number;
   } | null;
 };
 

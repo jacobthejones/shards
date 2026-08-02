@@ -57,10 +57,23 @@ type InteractiveWorkerCommand = Exclude<SimulationWorkerCommand, { type: "load" 
 type PendingWorkerCommandType = Exclude<InteractiveWorkerCommand["type"], "addBall" | "ping" | "setTech">;
 
 const AUDIO_GAIN = 9;
+const AUDIO_MASTER_GAIN = 0.78;
+const MAX_AUDIO_VOICES = 12;
+
+const reserveAudioVoice = (audio: Simulation["audio"]) => {
+  if (!audio || audio.activeVoices >= MAX_AUDIO_VOICES) return false;
+  audio.activeVoices += 1;
+  return true;
+};
+
+const releaseAudioVoice = (audio: Simulation["audio"]) => {
+  if (audio) audio.activeVoices = Math.max(0, audio.activeVoices - 1);
+};
 
 const playTone = (sim: Simulation, frequency: number, duration = 0.16, volume = 0.025) => {
   const audio = sim.audio;
   if (!sim.audioEnabled || !audio) return;
+  if (!reserveAudioVoice(audio)) return;
   const now = audio.context.currentTime;
   const oscillator = audio.context.createOscillator();
   const gain = audio.context.createGain();
@@ -71,7 +84,8 @@ const playTone = (sim: Simulation, frequency: number, duration = 0.16, volume = 
   gain.gain.exponentialRampToValueAtTime(volume * AUDIO_GAIN, now + 0.02);
   gain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
   oscillator.connect(gain);
-  gain.connect(audio.context.destination);
+  gain.connect(audio.masterGain);
+  oscillator.onended = () => releaseAudioVoice(audio);
   oscillator.start(now);
   oscillator.stop(now + duration + 0.03);
 };
@@ -90,8 +104,9 @@ const playHarmonicTone = (
 ) => {
   const audio = sim.audio;
   if (!sim.audioEnabled || !audio) return;
+  if (!reserveAudioVoice(audio)) return;
   const now = audio.context.currentTime;
-  partials.forEach(({ ratio, gain: partialGain }) => {
+  partials.forEach(({ ratio, gain: partialGain }, index) => {
     const oscillator = audio.context.createOscillator();
     const gain = audio.context.createGain();
     oscillator.type = "sine";
@@ -101,7 +116,8 @@ const playHarmonicTone = (
     gain.gain.exponentialRampToValueAtTime(Math.max(0.0001, volume * AUDIO_GAIN * partialGain), now + 0.006);
     gain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
     oscillator.connect(gain);
-    gain.connect(audio.context.destination);
+    gain.connect(audio.masterGain);
+    if (index === 0) oscillator.onended = () => releaseAudioVoice(audio);
     oscillator.start(now);
     oscillator.stop(now + duration + 0.03);
   });
@@ -115,7 +131,18 @@ const ensureAudio = async (sim: Simulation) => {
 
     try {
       const context = new AudioContextClass();
-      sim.audio = { context };
+      const masterGain = context.createGain();
+      const limiter = context.createDynamicsCompressor();
+      const now = context.currentTime;
+      masterGain.gain.setValueAtTime(AUDIO_MASTER_GAIN, now);
+      limiter.threshold.setValueAtTime(-8, now);
+      limiter.knee.setValueAtTime(6, now);
+      limiter.ratio.setValueAtTime(12, now);
+      limiter.attack.setValueAtTime(0.003, now);
+      limiter.release.setValueAtTime(0.08, now);
+      masterGain.connect(limiter);
+      limiter.connect(context.destination);
+      sim.audio = { context, masterGain, limiter, activeVoices: 0 };
     } catch {
       return;
     }
