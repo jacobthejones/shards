@@ -27,6 +27,7 @@
 #define CONDUCTION_COST 25000.0
 #define RESONANCE_SPLASH_DAMAGE 0.1
 #define CONDUCTION_SPLASH_DAMAGE 0.05
+#define SIMULATION_RUNTIME_VERSION 3
 #define BOUNCE_JITTER_RADIANS (0.02 * 3.1415926535897932384626433832795 / 180.0)
 #define COLLISION_SEPARATION 0.004
 #define MAX_COLLISIONS_PER_STEP 4
@@ -947,6 +948,7 @@ __attribute__((export_name("get_event_count"))) int32_t get_event_count(void) { 
 __attribute__((export_name("get_event_type"))) int32_t get_event_type(int32_t index) { return index >= 0 && index < event_count ? event_type[index] : 0; }
 __attribute__((export_name("get_event_shard"))) int32_t get_event_shard(int32_t index) { return index >= 0 && index < event_count ? event_shard[index] : -1; }
 __attribute__((export_name("get_event_source_shard"))) int32_t get_event_source_shard(int32_t index) { return index >= 0 && index < event_count ? event_source_shard[index] : -1; }
+__attribute__((export_name("get_simulation_runtime_version"))) int32_t get_simulation_runtime_version(void) { return SIMULATION_RUNTIME_VERSION; }
 __attribute__((export_name("get_shard_gx"))) int32_t get_shard_gx(int32_t index) { return index >= 0 && index < shard_count ? SHARD_GX[index] : 0; }
 __attribute__((export_name("get_shard_gy"))) int32_t get_shard_gy(int32_t index) { return index >= 0 && index < shard_count ? SHARD_GY[index] : 0; }
 __attribute__((export_name("get_shard_sx"))) double get_shard_sx(int32_t index) { return index >= 0 && index < shard_count ? SHARD_SX[index] : 0.0; }

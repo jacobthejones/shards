@@ -10,7 +10,7 @@ import {
 import type { SaveState } from "./save-state";
 import { TECH_IDS, type TechId } from "./tech-tree";
 
-const WASM_RUNTIME_VERSION = 2;
+export const WASM_RUNTIME_VERSION = 3;
 
 type WasmExports = {
   initialize_real_simulation: (seed: number, fieldSeed: number, balls: number) => void;
@@ -70,6 +70,7 @@ type WasmExports = {
   get_event_type: (index: number) => number;
   get_event_shard: (index: number) => number;
   get_event_source_shard: (index: number) => number;
+  get_simulation_runtime_version: () => number;
 };
 
 type ArrowMeta = Pick<Arrow, "id" | "hue">;
@@ -92,7 +93,12 @@ export class WasmSimulation {
         ceil: Math.ceil,
       },
     });
-    return instance.exports as unknown as WasmExports;
+    const wasm = instance.exports as unknown as Partial<WasmExports>;
+    if (typeof wasm.get_simulation_runtime_version !== "function"
+      || wasm.get_simulation_runtime_version() !== WASM_RUNTIME_VERSION) {
+      throw new Error(`Incompatible simulation.wasm runtime (expected version ${WASM_RUNTIME_VERSION})`);
+    }
+    return wasm as WasmExports;
   }
 
   static async create(): Promise<WasmSimulation> {

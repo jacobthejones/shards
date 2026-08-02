@@ -114,7 +114,9 @@ test("keeps the prototype self-contained", async () => {
   assert.match(worker, /case "load"/);
   assert.match(worker, /case "setTech"/);
   assert.match(wasmSimulation, /simulation\.wasm\?v=\$\{WASM_RUNTIME_VERSION\}/);
+  assert.match(wasmSimulation, /WASM_RUNTIME_VERSION = 3/);
   assert.match(wasmSimulation, /get_event_source_shard/);
+  assert.match(wasmSimulation, /get_simulation_runtime_version/);
   assert.match(packageJson, /build:wasm/);
   assert.match(saveState, /SaveStateVersion\.V2/);
   assert.match(saveState, /SaveStateVersion\.V1/);
