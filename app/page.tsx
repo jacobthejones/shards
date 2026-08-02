@@ -41,6 +41,7 @@ import {
 } from "./save-state";
 
 type InteractiveWorkerCommand = Exclude<SimulationWorkerCommand, { type: "load" }>;
+type PendingWorkerCommandType = Exclude<InteractiveWorkerCommand["type"], "addBall" | "ping">;
 
 const AUDIO_GAIN = 9;
 
@@ -198,10 +199,13 @@ export default function Home() {
   };
 
   const buyArrow = () => {
-    if (hud.score < ballCostForCount(hud.arrows)) return;
-    sendWorkerCommand({ type: "addBall" });
     const sim = simRef.current;
-    if (sim) playTone(sim, 523.25, 0.3, 0.04);
+    if (!sim || sim.score < ballCostForCount(sim.arrows.length)) {
+      if (sim) setHud(getHud(sim));
+      return;
+    }
+    sendWorkerCommand({ type: "addBall" });
+    playTone(sim, 523.25, 0.3, 0.04);
   };
 
   const resetRun = () => {
@@ -272,11 +276,8 @@ export default function Home() {
     const fallbackDamagedShardKeys = new Set<string>();
     const metricsEnabled = new URLSearchParams(window.location.search).has("metrics");
     const benchmarkBallCount = Number(new URLSearchParams(window.location.search).get("balls"));
-    let workerResponsive = worker === null;
-    let workerFallbackTimer: number | null = null;
-    let workerCommandTimer: number | null = null;
     let pendingWorkerCommand: {
-      type: InteractiveWorkerCommand["type"];
+      type: PendingWorkerCommandType;
       targetCount?: number;
       targetPaused?: boolean;
     } | null = null;
@@ -507,6 +508,7 @@ export default function Home() {
 
     const applyWorkerState = (state: Extract<SimulationWorkerMessage, { type: "state" | "ready" }>['state'], events: SimulationEvent[]) => {
       const wasPaused = sim.paused;
+      const previousArrowCount = sim.arrows.length;
       sim.time = state.time;
       sim.fieldSeed = state.fieldSeed;
       sim.randomState = state.randomState;
@@ -536,6 +538,7 @@ export default function Home() {
         shard.impacts = dynamicShard.impacts.map((impact) => ({ ...impact }));
       });
       if (events.length > 0) handleEvents(events);
+      if (previousArrowCount > 0 && state.arrows.length > previousArrowCount) saveCurrentGame();
 
       const now = performance.now();
       if (wasPaused !== state.paused || now - hudTime >= 180) {
@@ -566,33 +569,23 @@ export default function Home() {
           ? state.paused === pendingWorkerCommand.targetPaused
           : pendingWorkerCommand.type === "reset"
             ? state.time === 0 && state.awaitingStart && state.arrows.length === 1
-            : pendingWorkerCommand.type === "addBall"
-              ? state.arrows.length === pendingWorkerCommand.targetCount
-              : pendingWorkerCommand.type === "setBallCount"
-                ? state.arrows.length === pendingWorkerCommand.targetCount
-                : true;
+            : state.arrows.length === pendingWorkerCommand.targetCount;
       if (!satisfied) return;
-      if (pendingWorkerCommand.type === "addBall" || pendingWorkerCommand.type === "reset") saveCurrentGame();
+      if (pendingWorkerCommand.type === "reset") saveCurrentGame();
       pendingWorkerCommand = null;
-      if (workerCommandTimer !== null) window.clearTimeout(workerCommandTimer);
-      workerCommandTimer = null;
     };
     const commandHandler = (command: InteractiveWorkerCommand) => {
       if (worker) {
-        const workerAtSend = worker;
+        if (command.type === "addBall" || command.type === "ping") {
+          worker.postMessage(command);
+          return;
+        }
         pendingWorkerCommand = {
           type: command.type,
           ...(command.type === "togglePause" ? { targetPaused: !sim.paused } : {}),
-          ...(command.type === "addBall" ? { targetCount: sim.arrows.length + 1 } : {}),
           ...(command.type === "setBallCount" ? { targetCount: Math.max(1, Math.floor(command.count)) } : {}),
         };
         worker.postMessage(command);
-        if (command.type !== "ping") {
-          if (workerCommandTimer !== null) window.clearTimeout(workerCommandTimer);
-          workerCommandTimer = window.setTimeout(() => {
-            if (worker === workerAtSend && pendingWorkerCommand?.type === command.type) activateFallback();
-          }, 500);
-        }
         return;
       }
       switch (command.type) {
@@ -639,17 +632,11 @@ export default function Home() {
 
     activateFallback = () => {
       if (!worker) return;
-      const shouldRun = !sim.paused && !sim.awaitingStart;
       worker.terminate();
       worker = null;
-      workerResponsive = true;
       pendingWorkerCommand = null;
-      if (workerCommandTimer !== null) window.clearTimeout(workerCommandTimer);
-      workerCommandTimer = null;
-      Object.assign(sim, createSimulation());
-      if (shouldRun) {
-        sim.paused = false;
-        sim.awaitingStart = false;
+      if (sim.shards.size === 0) {
+        Object.assign(sim, savedGameState ? simulationFromSaveState(savedGameState) : createSimulation());
       }
       fallbackAccumulator = 0;
       fallbackDamagedShardKeys.clear();
@@ -664,7 +651,6 @@ export default function Home() {
       worker.onerror = activateFallback;
       worker.onmessage = (message: MessageEvent<SimulationWorkerMessage>) => {
         if (message.data.type === "ready") {
-          if (workerCommandTimer !== null) window.clearTimeout(workerCommandTimer);
           sim.shards = new Map(message.data.shards.map((shard) => [shard.key, {
             ...shard,
             health: 1,
@@ -693,7 +679,6 @@ export default function Home() {
           return;
         }
         if (message.data.type === "state") {
-          workerResponsive = true;
           awaitingStartRef.current = message.data.state.awaitingStart;
           applyWorkerState(message.data.state, message.data.events);
           acknowledgeWorkerState(message.data.state);
@@ -708,11 +693,6 @@ export default function Home() {
       updateHud();
     }
     const saveTimer = window.setInterval(saveCurrentGame, SAVE_STATE_INTERVAL_MS);
-    if (worker) {
-      workerFallbackTimer = window.setTimeout(() => {
-        if (!workerResponsive) activateFallback();
-      }, 1500);
-    }
 
     const tick = (now: number) => {
       const wallDelta = Math.min(0.25, Math.max(0, (now - lastTime) / 1000));
@@ -775,8 +755,6 @@ export default function Home() {
       window.removeEventListener("click", startOnInteraction);
       window.removeEventListener("keydown", startOnInteraction);
       commandHandlerRef.current = () => {};
-      if (workerFallbackTimer !== null) window.clearTimeout(workerFallbackTimer);
-      if (workerCommandTimer !== null) window.clearTimeout(workerCommandTimer);
       window.clearInterval(saveTimer);
       worker?.terminate();
       closeAudio(sim);

@@ -171,7 +171,8 @@ self.onmessage = (event: MessageEvent<SimulationWorkerCommand>) => {
       postReady();
       break;
     case "addBall":
-      if (buyBall(sim)) postState([]);
+      buyBall(sim);
+      postState([]);
       break;
     case "setBallCount": {
       const targetCount = Math.max(1, Math.floor(event.data.count));
