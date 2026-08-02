@@ -42,6 +42,8 @@ import {
 
 type InteractiveWorkerCommand = Exclude<SimulationWorkerCommand, { type: "load" }>;
 
+const AUDIO_GAIN = 3;
+
 const playTone = (sim: Simulation, frequency: number, duration = 0.16, volume = 0.025) => {
   const audio = sim.audio;
   if (!sim.audioEnabled || !audio) return;
@@ -52,7 +54,7 @@ const playTone = (sim: Simulation, frequency: number, duration = 0.16, volume = 
   oscillator.frequency.setValueAtTime(frequency, now);
   oscillator.frequency.exponentialRampToValueAtTime(frequency * 1.08, now + duration);
   gain.gain.setValueAtTime(0.0001, now);
-  gain.gain.exponentialRampToValueAtTime(volume, now + 0.02);
+  gain.gain.exponentialRampToValueAtTime(volume * AUDIO_GAIN, now + 0.02);
   gain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
   oscillator.connect(gain);
   gain.connect(audio.context.destination);
