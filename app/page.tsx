@@ -34,7 +34,9 @@ import {
   type SaveState,
 } from "./save-state";
 import {
+  TECH_IDS,
   TECH_TREE,
+  TECH_TREE_BRANCHES,
   techHasUnlockedDependents,
   techIsUnlocked,
   type TechDefinition,
@@ -150,6 +152,13 @@ const TreeIcon = () => (
 const ResonanceIcon = () => (
   <svg className="resonance-icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
     <path fillRule="evenodd" d="M12 2.75L21.25 12L12 21.25L2.75 12L12 2.75ZM12 8.5L8.5 12L12 15.5L15.5 12L12 8.5Z" />
+  </svg>
+);
+
+const ChosenOneIcon = () => (
+  <svg className="chosen-one-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+    <circle cx="12" cy="12" r="3.15" fill="currentColor" />
+    <path d="M12 2.5V6M12 18V21.5M2.5 12H6M18 12H21.5M5.3 5.3L7.8 7.8M16.2 16.2L18.7 18.7M18.7 5.3L16.2 7.8M7.8 16.2L5.3 18.7" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
   </svg>
 );
 
@@ -564,10 +573,11 @@ export default function Home() {
     };
 
     const drawArrow = (arrow: Arrow) => {
+      const isChosenBall = arrow.id === 0 && sim.unlockedTechs.includes(TECH_IDS.CHOSEN_ONE);
       context.save();
       context.shadowBlur = 0.28;
-      context.shadowColor = `hsla(${arrow.hue}, 100%, 74%, 0.8)`;
-      context.fillStyle = `hsl(${arrow.hue}, 88%, 68%)`;
+      context.shadowColor = isChosenBall ? "rgba(232, 240, 244, 0.86)" : `hsla(${arrow.hue}, 100%, 74%, 0.8)`;
+      context.fillStyle = isChosenBall ? "#e1e8ec" : `hsl(${arrow.hue}, 88%, 68%)`;
       context.beginPath();
       context.arc(arrow.x, arrow.y, sim.ballRadius, 0, TAU);
       context.fill();
@@ -931,22 +941,29 @@ export default function Home() {
             <span className="support-kicker">Development</span>
             <h2 id="tech-tree-title">Tech tree</h2>
             <div className="tech-tree-grid" aria-label="Available technologies">
-              {TECH_TREE.map((tech, index) => {
-                const unlocked = techIsUnlocked(unlockedTechs, tech.id);
-                return (
-                  <div className="tech-tree-entry" key={tech.id}>
-                    {index > 0 && <span className="tech-branch-line" aria-hidden="true" />}
-                    <button
-                      className={`tech-node ${unlocked ? "unlocked" : ""} ${canPurchaseTech(tech) ? "available" : ""}`}
-                      onClick={() => setSelectedTechId(tech.id)}
-                      aria-label={`${tech.title}${unlocked ? " unlocked" : " technology"}`}
-                    >
-                      {tech.icon === "resonance" && <ResonanceIcon />}
-                      {tech.icon === "conduction" && <ConductionIcon />}
-                    </button>
-                  </div>
-                );
-              })}
+              {TECH_TREE_BRANCHES.map((branch) => (
+                <div className="tech-tree-branch" key={branch.join("-")}>
+                  {branch.map((techId, index) => {
+                    const tech = TECH_TREE.find((candidate) => candidate.id === techId);
+                    if (!tech) return null;
+                    const unlocked = techIsUnlocked(unlockedTechs, tech.id);
+                    return (
+                      <div className="tech-tree-entry" key={tech.id}>
+                        {index > 0 && <span className="tech-branch-line" aria-hidden="true" />}
+                        <button
+                          className={`tech-node ${unlocked ? "unlocked" : ""} ${canPurchaseTech(tech) ? "available" : ""}`}
+                          onClick={() => setSelectedTechId(tech.id)}
+                          aria-label={`${tech.title}${unlocked ? " unlocked" : " technology"}`}
+                        >
+                          {tech.icon === "chosen-one" && <ChosenOneIcon />}
+                          {tech.icon === "resonance" && <ResonanceIcon />}
+                          {tech.icon === "conduction" && <ConductionIcon />}
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              ))}
             </div>
             {selectedTech && (
               <div className="tech-detail" role="region" aria-labelledby="selected-tech-title">

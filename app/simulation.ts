@@ -111,7 +111,7 @@ export type SimulationWorkerCommand =
   | { type: "togglePause" }
   | { type: "reset" }
   | { type: "addBall" }
-  | { type: "setTech"; tech: "resonance" | "conduction"; enabled: boolean }
+  | { type: "setTech"; tech: "chosen-one" | "resonance" | "conduction"; enabled: boolean }
   | { type: "setBallCount"; count: number }
   | { type: "load"; save: import("./save-state").SaveState };
 

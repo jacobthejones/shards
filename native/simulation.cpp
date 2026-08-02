@@ -25,9 +25,12 @@
 #define BALL_COST_GROWTH 1.2
 #define RESONANCE_COST 10000.0
 #define CONDUCTION_COST 25000.0
+#define CHOSEN_ONE_COST 10000.0
 #define RESONANCE_SPLASH_DAMAGE 0.1
 #define CONDUCTION_SPLASH_DAMAGE 0.05
-#define SIMULATION_RUNTIME_VERSION 3
+#define CHOSEN_ONE_DAMAGE_MULTIPLIER 5.0
+#define CHOSEN_BALL_INDEX 0
+#define SIMULATION_RUNTIME_VERSION 4
 #define BOUNCE_JITTER_RADIANS (0.02 * 3.1415926535897932384626433832795 / 180.0)
 #define COLLISION_SEPARATION 0.004
 #define MAX_COLLISIONS_PER_STEP 4
@@ -87,6 +90,7 @@ static double simulation_time;
 static uint32_t rng_state;
 static double current_field_seed;
 static int32_t next_impact_id;
+static int32_t chosen_one_unlocked;
 static int32_t resonance_unlocked;
 static int32_t conduction_unlocked;
 static int32_t event_count;
@@ -455,8 +459,11 @@ static void damage_shard(
   }
 }
 
-static void apply_resonance(int32_t source) {
+static void apply_resonance(int32_t source, int32_t ball) {
   if (!resonance_unlocked) return;
+  double splash_multiplier = chosen_one_unlocked && ball == CHOSEN_BALL_INDEX
+    ? CHOSEN_ONE_DAMAGE_MULTIPLIER
+    : 1.0;
   int32_t first_neighbors[MAX_TOUCHING_SHARDS];
   int32_t first_count = collect_touching_shards(source, first_neighbors, MAX_TOUCHING_SHARDS);
   for (int32_t index = 0; index < first_count; index += 1) {
@@ -464,7 +471,7 @@ static void apply_resonance(int32_t source) {
     double shared_x, shared_y, inward_x, inward_y;
     if (!shared_edge_for_shards(source, neighbor, &shared_x, &shared_y, &inward_x, &inward_y)) continue;
     record_event(2, neighbor, source);
-    damage_shard(neighbor, RESONANCE_SPLASH_DAMAGE, shared_x, shared_y, inward_x, inward_y, 0);
+    damage_shard(neighbor, RESONANCE_SPLASH_DAMAGE * splash_multiplier, shared_x, shared_y, inward_x, inward_y, 0);
   }
 
   if (!conduction_unlocked) return;
@@ -489,7 +496,7 @@ static void apply_resonance(int32_t source) {
     double shared_x, shared_y, inward_x, inward_y;
     if (!shared_edge_for_shards(second_parents[index], neighbor, &shared_x, &shared_y, &inward_x, &inward_y)) continue;
     record_event(4, neighbor, source);
-    damage_shard(neighbor, CONDUCTION_SPLASH_DAMAGE, shared_x, shared_y, inward_x, inward_y, 0);
+    damage_shard(neighbor, CONDUCTION_SPLASH_DAMAGE * splash_multiplier, shared_x, shared_y, inward_x, inward_y, 0);
   }
 }
 
@@ -534,6 +541,7 @@ static void initialize_balls(uint32_t seed, double field_seed_override, int32_t 
   recent_break_rate = 0.0;
   simulation_time = 0.0;
   next_impact_id = 1;
+  chosen_one_unlocked = 0;
   resonance_unlocked = 0;
   conduction_unlocked = 0;
   event_count = 0;
@@ -785,10 +793,12 @@ static void step_simulation(void) {
         BALL_VY[ball] = bounced_x * jitter_sine + bounced_y * jitter_cosine;
         record_event(1, collision.shard, collision.shard);
         if (BALL_HIT_COOLDOWN[ball] <= 0.0) {
-          damage_shard(collision.shard, BASE_HIT_DAMAGE, collision.point_x, collision.point_y, -collision.normal_x, -collision.normal_y, 1);
+          double direct_damage = BASE_HIT_DAMAGE;
+          if (chosen_one_unlocked && ball == CHOSEN_BALL_INDEX) direct_damage *= CHOSEN_ONE_DAMAGE_MULTIPLIER;
+          damage_shard(collision.shard, direct_damage, collision.point_x, collision.point_y, -collision.normal_x, -collision.normal_y, 1);
           BALL_HIT_COOLDOWN[ball] = 0.14;
         }
-        apply_resonance(collision.shard);
+        apply_resonance(collision.shard, ball);
       }
       remaining *= (1.0 - collision.time) > 0.0 ? 1.0 - collision.time : 0.0;
       collision_count += 1;
@@ -862,8 +872,25 @@ __attribute__((export_name("set_tech_resonance_state"))) void set_tech_resonance
   resonance_unlocked = enabled ? 1 : 0;
 }
 
+__attribute__((export_name("set_tech_chosen_one_state"))) void set_tech_chosen_one_state(int32_t enabled) {
+  chosen_one_unlocked = enabled ? 1 : 0;
+}
+
 __attribute__((export_name("set_tech_conduction_state"))) void set_tech_conduction_state(int32_t enabled) {
   conduction_unlocked = enabled && resonance_unlocked ? 1 : 0;
+}
+
+__attribute__((export_name("set_tech_chosen_one"))) int32_t set_tech_chosen_one(int32_t enabled) {
+  if (enabled) {
+    if (chosen_one_unlocked || score < CHOSEN_ONE_COST) return 0;
+    score -= CHOSEN_ONE_COST;
+    chosen_one_unlocked = 1;
+    return 1;
+  }
+  if (!chosen_one_unlocked) return 0;
+  score += CHOSEN_ONE_COST;
+  chosen_one_unlocked = 0;
+  return 1;
 }
 
 __attribute__((export_name("set_tech_resonance"))) int32_t set_tech_resonance(int32_t enabled) {
@@ -933,6 +960,7 @@ __attribute__((export_name("set_shard_impact"))) void set_shard_impact(int32_t s
 }
 
 __attribute__((export_name("get_score"))) double get_score(void) { return score; }
+__attribute__((export_name("get_tech_chosen_one"))) int32_t get_tech_chosen_one(void) { return chosen_one_unlocked; }
 __attribute__((export_name("get_tech_resonance"))) int32_t get_tech_resonance(void) { return resonance_unlocked; }
 __attribute__((export_name("get_tech_conduction"))) int32_t get_tech_conduction(void) { return conduction_unlocked; }
 __attribute__((export_name("get_total_hits"))) int32_t get_total_hits(void) { return total_hits; }

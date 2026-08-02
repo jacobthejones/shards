@@ -322,7 +322,8 @@ button:focus-visible {
 }
 
 .resonance-icon,
-.conduction-icon {
+.conduction-icon,
+.chosen-one-icon {
   display: block;
   width: 29px;
   height: 29px;
@@ -485,11 +486,19 @@ button:focus-visible {
 
 .tech-tree-grid {
   display: flex;
-  flex-direction: column;
-  align-items: center;
+  align-items: flex-start;
   justify-content: center;
+  gap: 26px;
   min-height: 150px;
   padding: 4px;
+}
+
+.tech-tree-branch {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  align-items: center;
+  min-width: 0;
 }
 
 .tech-tree-entry {

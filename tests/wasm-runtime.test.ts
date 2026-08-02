@@ -48,6 +48,98 @@ test("the C++ runtime preserves the fixed ball speed and upgrade cost", async ()
   assert.equal(wasm.add_ball(), 0);
 });
 
+const centerShardIndexFor = (wasm: Record<string, (...args: number[]) => number>) => {
+  for (let index = 0; index < wasm.get_shard_count(); index += 1) {
+    if (wasm.get_shard_gx(index) === 0 && wasm.get_shard_gy(index) === 0) return index;
+  }
+  assert.fail("center shard was not found");
+};
+
+const prepareSingleCollision = (wasm: Record<string, (...args: number[]) => number>, activeNeighbors: boolean) => {
+  wasm.set_all_shards_broken(1);
+  for (let index = 0; index < wasm.get_shard_count(); index += 1) {
+    const gx = wasm.get_shard_gx(index);
+    const gy = wasm.get_shard_gy(index);
+    if (gx === 0 && gy === 0 || activeNeighbors && Math.abs(gx) <= 1 && Math.abs(gy) <= 1) {
+      wasm.set_shard_broken(index, 0);
+    }
+  }
+  wasm.set_ball_state(0, 0, 0, -1.4366976021418008, 0, 0);
+};
+
+const advanceToEvent = (wasm: Record<string, (...args: number[]) => number>, eventType: number) => {
+  for (let step = 0; step < 120; step += 1) {
+    wasm.step_real_simulation(1);
+    for (let index = 0; index < wasm.get_event_count(); index += 1) {
+      if (wasm.get_event_type(index) === eventType) return;
+    }
+  }
+  assert.fail(`event type ${eventType} did not occur during the collision setup`);
+};
+
+test("The Chosen One purchase and refund use the original ball", async () => {
+  const wasm = await loadRuntime();
+  wasm.initialize_real_simulation(7, 77, 2);
+  wasm.set_score(10_000);
+  assert.equal(wasm.set_tech_chosen_one(1), 1);
+  assert.equal(wasm.get_tech_chosen_one(), 1);
+  assert.equal(wasm.get_score(), 0);
+  assert.equal(wasm.set_tech_chosen_one(0), 1);
+  assert.equal(wasm.get_tech_chosen_one(), 0);
+  assert.equal(wasm.get_score(), 10_000);
+});
+
+test("The Chosen One empowers only the original ball and makes its direct hit break", async () => {
+  const wasm = await loadRuntime();
+  wasm.initialize_real_simulation(7, 77, 2);
+  wasm.set_tech_chosen_one_state(1);
+  prepareSingleCollision(wasm, false);
+  wasm.set_ball_state(0, 100, 100, 0, 0, 0);
+  wasm.set_ball_state(1, 0, 0, -1.4366976021418008, 0, 0);
+  advanceToEvent(wasm, 1);
+  assert.equal(wasm.get_total_breaks(), 0, "the second ball should not receive the chosen power");
+  const centerShard = centerShardIndexFor(wasm);
+  assert.ok(Math.abs(wasm.get_shard_health(centerShard) - 0.8) < 0.000001);
+
+  wasm.initialize_real_simulation(7, 77, 1);
+  wasm.set_tech_chosen_one_state(1);
+  prepareSingleCollision(wasm, false);
+  advanceToEvent(wasm, 3);
+  assert.equal(wasm.get_total_breaks(), 1);
+  assert.equal(wasm.get_shard_health(centerShardIndexFor(wasm)), 0);
+});
+
+test("The Chosen One multiplies Resonance and Conduction splash damage", async () => {
+  const wasm = await loadRuntime();
+  wasm.initialize_real_simulation(7, 77, 1);
+  wasm.set_tech_chosen_one_state(1);
+  wasm.set_tech_resonance_state(1);
+  wasm.set_tech_conduction_state(1);
+  prepareSingleCollision(wasm, true);
+  advanceToEvent(wasm, 3);
+
+  let resonanceEvents = 0;
+  let conductionEvents = 0;
+  let hasHalfDamageResonance = false;
+  let hasQuarterDamageConduction = false;
+  for (let index = 0; index < wasm.get_event_count(); index += 1) {
+    const type = wasm.get_event_type(index);
+    const health = wasm.get_shard_health(wasm.get_event_shard(index));
+    if (type === 2) {
+      resonanceEvents += 1;
+      if (Math.abs((1 - health) - 0.5) < 0.000001) hasHalfDamageResonance = true;
+    }
+    if (type === 4) {
+      conductionEvents += 1;
+      if (Math.abs((1 - health) - 0.25) < 0.000001) hasQuarterDamageConduction = true;
+    }
+  }
+  assert.ok(resonanceEvents > 0);
+  assert.ok(conductionEvents > 0);
+  assert.equal(hasHalfDamageResonance, true);
+  assert.equal(hasQuarterDamageConduction, true);
+});
+
 test("Resonance and Conduction purchase, refund, and propagate damage", async () => {
   const wasm = await loadRuntime();
   wasm.initialize_real_simulation(7, 77, 1);

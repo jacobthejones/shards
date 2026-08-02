@@ -1,4 +1,5 @@
 export const TECH_IDS = {
+  CHOSEN_ONE: "chosen-one",
   RESONANCE: "resonance",
   CONDUCTION: "conduction",
 } as const;
@@ -7,8 +8,9 @@ export type TechId = typeof TECH_IDS[keyof typeof TECH_IDS];
 
 export const RESONANCE_COST = 10_000;
 export const CONDUCTION_COST = 25_000;
+export const CHOSEN_ONE_COST = 10_000;
 
-export type TechIcon = "resonance" | "conduction";
+export type TechIcon = "chosen-one" | "resonance" | "conduction";
 
 export type TechDefinition = {
   id: TechId;
@@ -20,6 +22,14 @@ export type TechDefinition = {
 };
 
 export const TECH_TREE: TechDefinition[] = [
+  {
+    id: TECH_IDS.CHOSEN_ONE,
+    title: "The Chosen One",
+    description: "The first ball becomes chosen. Its impacts break five times harder, and its resonance carries that strength outward.",
+    icon: "chosen-one",
+    cost: CHOSEN_ONE_COST,
+    dependsOn: [],
+  },
   {
     id: TECH_IDS.CONDUCTION,
     title: "Conduction",
@@ -36,6 +46,11 @@ export const TECH_TREE: TechDefinition[] = [
     cost: RESONANCE_COST,
     dependsOn: [],
   },
+];
+
+export const TECH_TREE_BRANCHES: TechId[][] = [
+  [TECH_IDS.CHOSEN_ONE],
+  [TECH_IDS.CONDUCTION, TECH_IDS.RESONANCE],
 ];
 
 export const techIsUnlocked = (unlockedTechs: string[], techId: TechId) => unlockedTechs.includes(techId);

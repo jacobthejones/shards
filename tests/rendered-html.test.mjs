@@ -84,6 +84,10 @@ test("keeps the prototype self-contained", async () => {
   assert.match(page, /Open tech tree/);
   assert.match(page, /tree-icon/);
   assert.match(page, /resonance-icon/);
+  assert.match(page, /chosen-one-icon/);
+  assert.match(page, /TECH_TREE_BRANCHES/);
+  assert.match(page, /sim\.unlockedTechs\.includes\(TECH_IDS\.CHOSEN_ONE\)/);
+  assert.match(page, /#e1e8ec/);
   assert.doesNotMatch(page, /⌘|◈/);
   assert.match(page, /setTech/);
   assert.match(page, /if \(techStateChanged\) saveCurrentGame\(\);/);
@@ -119,7 +123,8 @@ test("keeps the prototype self-contained", async () => {
   assert.match(worker, /case "load"/);
   assert.match(worker, /case "setTech"/);
   assert.match(wasmSimulation, /simulation\.wasm\?v=\$\{WASM_RUNTIME_VERSION\}/);
-  assert.match(wasmSimulation, /WASM_RUNTIME_VERSION = 3/);
+  assert.match(wasmSimulation, /WASM_RUNTIME_VERSION = 4/);
+  assert.match(wasmSimulation, /set_tech_chosen_one/);
   assert.match(wasmSimulation, /get_event_source_shard/);
   assert.match(wasmSimulation, /get_simulation_runtime_version/);
   assert.match(packageJson, /build:wasm/);
@@ -128,10 +133,13 @@ test("keeps the prototype self-contained", async () => {
   assert.match(saveState, /unlockedTechs/);
   assert.match(techTree, /RESONANCE_COST = 10_000/);
   assert.match(techTree, /CONDUCTION_COST = 25_000/);
+  assert.match(techTree, /CHOSEN_ONE_COST = 10_000/);
+  assert.match(techTree, /The Chosen One/);
   assert.match(techTree, /Resonance/);
   assert.match(techTree, /Conduction/);
   assert.match(techTree, /icon: "resonance"/);
   assert.match(techTree, /icon: "conduction"/);
+  assert.match(techTree, /icon: "chosen-one"/);
   assert.match(css, /tech-branch-line/);
   assert.match(renderCache, /RENDER_CHUNK_SIZE = 8/);
   assert.match(renderCache, /RENDER_CHUNK_PADDING = 1\.25/);
