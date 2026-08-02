@@ -6,11 +6,13 @@ export type TechId = typeof TECH_IDS[keyof typeof TECH_IDS];
 
 export const RESONANCE_COST = 10_000;
 
+export type TechIcon = "resonance";
+
 export type TechDefinition = {
   id: TechId;
   title: string;
   description: string;
-  icon: string;
+  icon: TechIcon;
   cost: number;
   dependsOn: TechId[];
 };
@@ -20,7 +22,7 @@ export const TECH_TREE: TechDefinition[] = [
     id: TECH_IDS.RESONANCE,
     title: "Resonance",
     description: "When a ball strikes a shard, every shard touching it absorbs a softer echo of the impact.",
-    icon: "◈",
+    icon: "resonance",
     cost: RESONANCE_COST,
     dependsOn: [],
   },

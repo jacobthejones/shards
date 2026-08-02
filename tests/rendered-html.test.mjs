@@ -74,6 +74,9 @@ test("keeps the prototype self-contained", async () => {
   assert.match(page, /ballRadius/);
   assert.match(page, /arrows: 1/);
   assert.match(page, /Open tech tree/);
+  assert.match(page, /tree-icon/);
+  assert.match(page, /resonance-icon/);
+  assert.doesNotMatch(page, /⌘|◈/);
   assert.match(page, /setTech/);
   assert.doesNotMatch(page, /prism tip|dampener|ball size|BALL_SIZE_COST|buyBallSize/i);
   assert.match(simulation, /buildVoronoiCell/);
@@ -113,4 +116,5 @@ test("keeps the prototype self-contained", async () => {
   assert.match(saveState, /unlockedTechs/);
   assert.match(techTree, /RESONANCE_COST = 10_000/);
   assert.match(techTree, /Resonance/);
+  assert.match(techTree, /icon: "resonance"/);
 });

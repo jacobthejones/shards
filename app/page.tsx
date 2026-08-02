@@ -100,6 +100,18 @@ const VIEWPORT_BORDER_INSET = 0.1;
 const VIEW_ZOOM_RATE = 0.7;
 const EMPTY_VIGNETTE_RATE = 0.35;
 
+const TreeIcon = () => (
+  <svg className="tree-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+    <path d="M12 21V12M12 12L8.5 9.5L7.9 6.7L8.1 4M12 12L15.5 9.5L16.1 6.7L15.9 4" />
+  </svg>
+);
+
+const ResonanceIcon = () => (
+  <svg className="resonance-icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+    <path fillRule="evenodd" d="M12 2.75L21.25 12L12 21.25L2.75 12L12 2.75ZM12 8.5L8.5 12L12 15.5L15.5 12L12 8.5Z" />
+  </svg>
+);
+
 const createRenderSimulation = (): Simulation => ({
   shards: new Map(),
   broken: new Set(),
@@ -700,7 +712,7 @@ export default function Home() {
             aria-label="Open tech tree"
             title="Open tech tree"
           >
-            <span className="tech-glyph" aria-hidden="true">⌘</span>
+            <TreeIcon />
           </button>
           <button className={`upgrade-card ${canBuyArrow ? "available" : ""}`} onClick={buyArrow} disabled={!canBuyArrow}>
             <span className="upgrade-icon ball-glyph">+</span>
@@ -728,7 +740,7 @@ export default function Home() {
                     onClick={() => setSelectedTechId(tech.id)}
                     aria-label={`${tech.title}${unlocked ? " unlocked" : " technology"}`}
                   >
-                    <span aria-hidden="true">{tech.icon}</span>
+                    {tech.icon === "resonance" && <ResonanceIcon />}
                   </button>
                 );
               })}
