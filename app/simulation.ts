@@ -67,7 +67,7 @@ export type Simulation = {
 export type SimulationHud = {
   score: number;
   arrows: number;
-  ring: number;
+  shardsBroken: number;
   rate: number;
   paused: boolean;
 };
@@ -801,7 +801,7 @@ export const buyBall = (sim: Simulation) => {
 export const getHud = (sim: Simulation): SimulationHud => ({
   score: Math.floor(sim.score),
   arrows: sim.arrows.length,
-  ring: 1 + Math.floor(Math.max(0, sim.broken.size - 1) / 9),
+  shardsBroken: sim.broken.size,
   rate: Math.round(sim.recentBreakRate * 10) / 10,
   paused: sim.paused,
 });

@@ -119,11 +119,12 @@ export default function Home() {
   const [hud, setHud] = useState<Hud>({
     score: STARTING_LUMENS,
     arrows: 1,
-    ring: 1,
+    shardsBroken: 0,
     rate: 0,
     paused: true,
   });
   const [audioOn, setAudioOn] = useState(true);
+  const [supportOpen, setSupportOpen] = useState(false);
 
   if (simRef.current == null) simRef.current = createRenderSimulation();
 
@@ -155,6 +156,15 @@ export default function Home() {
     startSimulationRef.current = startSimulation;
     togglePauseRef.current = togglePause;
   }, [startSimulation, togglePause]);
+
+  useEffect(() => {
+    if (!supportOpen) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setSupportOpen(false);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [supportOpen]);
 
   const toggleAudio = async () => {
     const sim = simRef.current;
@@ -190,7 +200,7 @@ export default function Home() {
     emptyCircleRadiusRef.current = 0;
     emptyCircleCenterXRef.current = 0;
     emptyCircleCenterYRef.current = 0;
-    setHud({ score: STARTING_LUMENS, arrows: 1, ring: 1, rate: 0, paused: true });
+    setHud({ score: STARTING_LUMENS, arrows: 1, shardsBroken: 0, rate: 0, paused: true });
     setAudioOn(true);
   };
 
@@ -728,7 +738,7 @@ export default function Home() {
           <div className="brand-mark" aria-hidden="true"><span /><span /><span /></div>
           <div className="brand-copy">
             <strong>SHARDS</strong>
-            <span>FIELD / {String(hud.ring).padStart(2, "0")}</span>
+            <span>SHARDS BROKEN / {formatScore(hud.shardsBroken)}</span>
           </div>
         </div>
         <div className="game-actions">
@@ -752,10 +762,26 @@ export default function Home() {
             <span className="upgrade-icon ball-glyph">+</span>
             <span><strong>Add ball</strong><small>{formatScore(arrowCost)} ✦</small></span>
           </button>
+          <button className="upgrade-card support-button" onClick={() => setSupportOpen(true)} aria-label="Support the project" title="Support the project">$</button>
         </div>
       </div>
 
       <div className="corner-note"><span>SPACE</span> pause &nbsp;·&nbsp; shards heal while untouched</div>
+
+      {supportOpen && (
+        <div className="support-modal-backdrop" onClick={() => setSupportOpen(false)}>
+          <section className="support-modal" role="dialog" aria-modal="true" aria-labelledby="support-title" onClick={(event) => event.stopPropagation()}>
+            <button className="support-close" onClick={() => setSupportOpen(false)} aria-label="Close support dialog">×</button>
+            <span className="support-kicker">Support hosting</span>
+            <h2 id="support-title">Send 25¢ to support the project</h2>
+            <div className="support-links">
+              <a href="https://paypal.me/jacobthejones/0.25USD" target="_blank" rel="noopener noreferrer">PayPal · 25¢</a>
+              <a href="venmo://paycharge?txn=pay&recipients=jacobthejones&amount=0.25&note=shards%20game" target="_blank" rel="noopener noreferrer">Venmo · 25¢</a>
+            </div>
+            <a className="support-fallback" href="https://venmo.com/u/jacobthejones" target="_blank" rel="noopener noreferrer">Open Venmo profile</a>
+          </section>
+        </div>
+      )}
     </main>
   );
 }

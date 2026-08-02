@@ -283,6 +283,16 @@ button:focus-visible {
 
 .upgrade-card:disabled { opacity: 0.42; cursor: not-allowed; }
 
+.support-button {
+  width: 58px;
+  min-width: 58px;
+  justify-content: center;
+  padding: 9px;
+  color: var(--teal-bright);
+  font-size: 21px;
+  line-height: 1;
+}
+
 .upgrade-card > span:last-child {
   display: flex;
   flex-direction: column;
@@ -332,6 +342,93 @@ button:focus-visible {
 
 .corner-note span { color: rgba(184, 210, 201, 0.55); }
 
+.support-modal-backdrop {
+  position: absolute;
+  z-index: 4;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(2, 8, 13, 0.58);
+  backdrop-filter: blur(7px);
+}
+
+.support-modal {
+  position: relative;
+  width: min(100%, 330px);
+  padding: 27px 28px 25px;
+  border: 1px solid rgba(159, 216, 205, 0.24);
+  background: rgba(7, 24, 30, 0.94);
+  box-shadow: 0 20px 70px rgba(0, 0, 0, 0.42);
+  text-align: center;
+}
+
+.support-close {
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  width: 26px;
+  height: 26px;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 22px;
+  line-height: 1;
+}
+
+.support-close:hover { color: var(--teal-bright); }
+
+.support-kicker {
+  color: var(--muted);
+  font-size: 8px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+.support-modal h2 {
+  margin: 13px 0 20px;
+  color: var(--ink);
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 21px;
+  font-weight: 400;
+  line-height: 1.2;
+}
+
+.support-links {
+  display: grid;
+  gap: 8px;
+}
+
+.support-links a {
+  display: block;
+  padding: 11px 12px;
+  border: 1px solid rgba(159, 216, 205, 0.18);
+  background: rgba(20, 65, 66, 0.35);
+  color: var(--teal-bright);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-decoration: none;
+  text-transform: uppercase;
+  transition: border-color 160ms ease, background 160ms ease;
+}
+
+.support-links a:hover {
+  border-color: var(--teal);
+  background: rgba(20, 65, 66, 0.7);
+}
+
+.support-fallback {
+  display: inline-block;
+  margin-top: 15px;
+  color: var(--muted-soft);
+  font-size: 9px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.support-fallback:hover { color: var(--teal-bright); }
+
 @media (max-width: 760px) {
   .game-topbar { padding: 19px 17px; }
   .game-state { top: 76px; left: 18px; }
@@ -348,6 +445,7 @@ button:focus-visible {
   }
   .upgrade-dock { width: 100%; }
   .upgrade-card { flex: 1; min-width: 0; padding-right: 7px; }
+  .support-button { flex: 0 0 58px; width: 58px; min-width: 58px; padding: 9px; }
   .upgrade-card strong { font-size: 8px; letter-spacing: 0.06em; }
   .corner-note { right: 18px; bottom: 8px; display: none; }
 }

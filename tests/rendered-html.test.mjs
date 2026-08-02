@@ -29,6 +29,8 @@ test("server-renders the shards experience", async () => {
   assert.match(html, /<title>shards — a study in regeneration<\/title>/i);
   assert.match(html, /An idle field that breathes back/);
   assert.match(html, /SHARDS/);
+  assert.match(html, /SHARDS BROKEN/);
+  assert.doesNotMatch(html, /FIELD \/ /);
   assert.match(html, /Make room for/);
   assert.doesNotMatch(html, /field motion|default speed|depth ∞/);
   assert.doesNotMatch(html, /field integrity|integrity-bar/);
@@ -59,6 +61,10 @@ test("keeps the prototype self-contained", async () => {
   assert.match(page, /emptyRegionEnclosingCircle/);
   assert.match(page, /shardBreakFrequency/);
   assert.match(page, /ballCost/);
+  assert.match(page, /Support the project/);
+  assert.match(page, /Send 25¢ to support the project/);
+  assert.match(page, /paypal\.me\/jacobthejones\/0\.25USD/);
+  assert.match(page, /venmo:\/\/paycharge/);
   assert.doesNotMatch(page, /Math\.pow\(1\.2/);
   assert.match(page, /awaitingStart/);
   assert.doesNotMatch(page, /setInterval|130\.81|174\.61/);
