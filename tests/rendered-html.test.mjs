@@ -90,6 +90,8 @@ test("keeps the prototype self-contained", async () => {
   assert.match(page, /sim\.unlockedTechs\.includes\(TECH_IDS\.CHOSEN_ONE\)/);
   assert.match(page, /#e1e8ec/);
   assert.match(page, /event\.type === "growth"/);
+  assert.match(page, /event\.type === "growth-break"/);
+  assert.match(page, /playGrowthBreakTone/);
   assert.doesNotMatch(page, /⌘|◈/);
   assert.match(page, /setTech/);
   assert.match(page, /if \(techStateChanged\) saveCurrentGame\(\);/);

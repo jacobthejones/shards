@@ -155,11 +155,18 @@ test("A ball passing through a growing cell resets it without reflecting", async
   const beforeX = wasm.get_ball_x(1);
   wasm.step_real_simulation(1);
 
+  let growthBreakEvents = 0;
+  let collisionEvents = 0;
+  for (let index = 0; index < wasm.get_event_count(); index += 1) {
+    if (wasm.get_event_type(index) === 6) growthBreakEvents += 1;
+    if (wasm.get_event_type(index) === 1) collisionEvents += 1;
+  }
   assert.equal(wasm.get_shard_growing(centerShard), 0);
   assert.equal(wasm.is_shard_broken(centerShard), 1);
   assert.equal(wasm.get_shard_growth(centerShard), 0);
   assert.ok(wasm.get_ball_x(1) < beforeX);
-  assert.equal(Array.from({ length: wasm.get_event_count() }, (_, index) => wasm.get_event_type(index)).includes(1), false);
+  assert.equal(growthBreakEvents, 1);
+  assert.equal(collisionEvents, 0);
 });
 
 test("Only the chosen ball can start New Growth", async () => {

@@ -398,7 +398,10 @@ export class WasmSimulation {
         events.push({ type: "break", hue: shard.hue, shardKey: shard.key });
       }
       if (type === 5) events.push({ type: "growth", hue: shard.hue, shardKey: shard.key });
-      if (type === 6) this.dirtyBrokenShardIndices.add(shardIndex);
+      if (type === 6) {
+        this.dirtyBrokenShardIndices.add(shardIndex);
+        events.push({ type: "growth-break", hue: shard.hue, shardKey: shard.key });
+      }
     }
     return events;
   }

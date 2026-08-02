@@ -91,6 +91,25 @@ const playTone = (sim: Simulation, frequency: number, duration = 0.16, volume = 
   oscillator.stop(now + duration + 0.03);
 };
 
+const playGrowthBreakTone = (sim: Simulation) => {
+  const audio = sim.audio;
+  if (!sim.audioEnabled || !audio || !reserveAudioVoice(audio)) return;
+  const now = audio.context.currentTime;
+  const oscillator = audio.context.createOscillator();
+  const gain = audio.context.createGain();
+  oscillator.type = "sine";
+  oscillator.frequency.setValueAtTime(680, now);
+  oscillator.frequency.exponentialRampToValueAtTime(734, now + 0.035);
+  gain.gain.setValueAtTime(0.0001, now);
+  gain.gain.exponentialRampToValueAtTime(0.0008 * AUDIO_GAIN, now + 0.004);
+  gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.035);
+  oscillator.connect(gain);
+  gain.connect(audio.masterGain);
+  oscillator.onended = () => releaseAudioVoice(audio);
+  oscillator.start(now);
+  oscillator.stop(now + 0.045);
+};
+
 type HarmonicPartial = {
   ratio: number;
   gain: number;
@@ -764,7 +783,10 @@ export default function Home() {
           return;
         }
         if (event.type === "growth") {
-          playTone(sim, 680, 0.05, 0.0018);
+          return;
+        }
+        if (event.type === "growth-break") {
+          playGrowthBreakTone(sim);
           return;
         }
         const shard = sim.shards.get(event.shardKey);

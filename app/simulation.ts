@@ -73,7 +73,7 @@ export type SimulationHud = {
 };
 
 export type SimulationEvent = {
-  type: "collision" | "hit" | "break" | "growth";
+  type: "collision" | "hit" | "break" | "growth" | "growth-break";
   hue: number;
   shardKey: string;
   volume?: number;
