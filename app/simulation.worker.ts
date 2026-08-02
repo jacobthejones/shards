@@ -92,6 +92,10 @@ self.onmessage = (event: MessageEvent<SimulationWorkerCommand>) => {
       simulation.addBall();
       postState([]);
       break;
+    case "setTech":
+      simulation.setTech(event.data.tech, event.data.enabled);
+      postState([]);
+      break;
     case "setBallCount": {
       const targetCount = Math.max(1, Math.floor(event.data.count));
       while (simulation.getState().arrows.length < targetCount && simulation.addBall()) {

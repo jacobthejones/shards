@@ -23,6 +23,8 @@
 #define HEALTH_EPSILON 0.000000001
 #define INITIAL_BALL_COST 300.0
 #define BALL_COST_GROWTH 1.2
+#define RESONANCE_COST 10000.0
+#define RESONANCE_SPLASH_DAMAGE 0.05
 #define BOUNCE_JITTER_RADIANS (0.02 * 3.1415926535897932384626433832795 / 180.0)
 #define COLLISION_SEPARATION 0.004
 #define MAX_COLLISIONS_PER_STEP 4
@@ -80,6 +82,7 @@ static double simulation_time;
 static uint32_t rng_state;
 static double current_field_seed;
 static int32_t next_impact_id;
+static int32_t resonance_unlocked;
 static int32_t event_count;
 static int32_t event_type[MAX_EVENTS_PER_STEP];
 static int32_t event_shard[MAX_EVENTS_PER_STEP];
@@ -333,6 +336,109 @@ static void refresh_damaged_shards(void) {
   }
 }
 
+static int points_close(double ax, double ay, double bx, double by) {
+  double dx = ax - bx;
+  double dy = ay - by;
+  return dx * dx + dy * dy <= 0.00000025;
+}
+
+static int shared_edge_for_shards(
+  int32_t first,
+  int32_t second,
+  double *point_x,
+  double *point_y,
+  double *inward_x,
+  double *inward_y
+) {
+  int32_t first_start = first * MAX_CELL_POINTS;
+  int32_t second_start = second * MAX_CELL_POINTS;
+  int32_t first_count = POINT_COUNT[first];
+  int32_t second_count = POINT_COUNT[second];
+  for (int32_t first_index = 0; first_index < first_count; first_index += 1) {
+    int32_t first_next = (first_index + 1) % first_count;
+    double first_ax = POINT_X[first_start + first_index];
+    double first_ay = POINT_Y[first_start + first_index];
+    double first_bx = POINT_X[first_start + first_next];
+    double first_by = POINT_Y[first_start + first_next];
+    for (int32_t second_index = 0; second_index < second_count; second_index += 1) {
+      int32_t second_next = (second_index + 1) % second_count;
+      double second_ax = POINT_X[second_start + second_index];
+      double second_ay = POINT_Y[second_start + second_index];
+      double second_bx = POINT_X[second_start + second_next];
+      double second_by = POINT_Y[second_start + second_next];
+      int same_direction = points_close(first_ax, first_ay, second_ax, second_ay)
+        && points_close(first_bx, first_by, second_bx, second_by);
+      int opposite_direction = points_close(first_ax, first_ay, second_bx, second_by)
+        && points_close(first_bx, first_by, second_ax, second_ay);
+      if (!same_direction && !opposite_direction) continue;
+
+      *point_x = (first_ax + first_bx + second_ax + second_bx) / 4.0;
+      *point_y = (first_ay + first_by + second_ay + second_by) / 4.0;
+      double edge_x = second_bx - second_ax;
+      double edge_y = second_by - second_ay;
+      double candidate_inward_x = -edge_y;
+      double candidate_inward_y = edge_x;
+      double midpoint_x = (second_ax + second_bx) / 2.0 - SHARD_SX[second];
+      double midpoint_y = (second_ay + second_by) / 2.0 - SHARD_SY[second];
+      if (candidate_inward_x * midpoint_x + candidate_inward_y * midpoint_y < 0.0) {
+        candidate_inward_x = -candidate_inward_x;
+        candidate_inward_y = -candidate_inward_y;
+      }
+      double length = sqrt(candidate_inward_x * candidate_inward_x + candidate_inward_y * candidate_inward_y);
+      if (length == 0.0) return 0;
+      *inward_x = candidate_inward_x / length;
+      *inward_y = candidate_inward_y / length;
+      return 1;
+    }
+  }
+  return 0;
+}
+
+static void damage_shard(
+  int32_t shard,
+  double damage,
+  double point_x,
+  double point_y,
+  double inward_x,
+  double inward_y,
+  int32_t awards_hit
+) {
+  if (SHARD_BROKEN[shard]) return;
+  refresh_shard_health(shard);
+  double remaining_health = SHARD_HEALTH[shard] - damage;
+  SHARD_HEALTH[shard] = remaining_health <= HEALTH_EPSILON ? 0.0 : remaining_health;
+  add_impact(shard, point_x, point_y, inward_x, inward_y, damage);
+  if (awards_hit) {
+    total_hits += 1;
+    score += 1.0;
+  }
+  if (SHARD_HEALTH[shard] <= 0.0 && !SHARD_BROKEN[shard]) {
+    SHARD_HEALTH[shard] = 0.0;
+    SHARD_BROKEN[shard] = 1;
+    total_breaks += 1;
+    recent_break_rate += 60.0 / RECENT_BREAK_RATE_TIME_CONSTANT_SECONDS;
+    score += 100.0;
+    record_event(3, shard);
+  }
+}
+
+static void apply_resonance(int32_t source) {
+  if (!resonance_unlocked) return;
+  int32_t source_gx = SHARD_GX[source];
+  int32_t source_gy = SHARD_GY[source];
+  for (int32_t gy = source_gy - 2; gy <= source_gy + 2; gy += 1) {
+    for (int32_t gx = source_gx - 2; gx <= source_gx + 2; gx += 1) {
+      if (!in_grid(gx, gy)) continue;
+      int32_t neighbor = GRID[grid_index(gx, gy)];
+      if (neighbor < 0 || neighbor == source || SHARD_BROKEN[neighbor]) continue;
+      double shared_x, shared_y, inward_x, inward_y;
+      if (!shared_edge_for_shards(source, neighbor, &shared_x, &shared_y, &inward_x, &inward_y)) continue;
+      record_event(2, neighbor);
+      damage_shard(neighbor, RESONANCE_SPLASH_DAMAGE, shared_x, shared_y, inward_x, inward_y, 0);
+    }
+  }
+}
+
 static void initialize_field(double field_seed) {
   shard_count = 0;
   current_field_seed = field_seed;
@@ -374,6 +480,7 @@ static void initialize_balls(uint32_t seed, double field_seed_override, int32_t 
   recent_break_rate = 0.0;
   simulation_time = 0.0;
   next_impact_id = 1;
+  resonance_unlocked = 0;
   event_count = 0;
 
   double initial_direction = rng_next() * TAU;
@@ -623,22 +730,10 @@ static void step_simulation(void) {
         BALL_VY[ball] = bounced_x * jitter_sine + bounced_y * jitter_cosine;
         record_event(1, collision.shard);
         if (BALL_HIT_COOLDOWN[ball] <= 0.0) {
-          refresh_shard_health(collision.shard);
-          double remaining_health = SHARD_HEALTH[collision.shard] - BASE_HIT_DAMAGE;
-          SHARD_HEALTH[collision.shard] = remaining_health <= HEALTH_EPSILON ? 0.0 : remaining_health;
-          add_impact(collision.shard, collision.point_x, collision.point_y, -collision.normal_x, -collision.normal_y, BASE_HIT_DAMAGE);
-          total_hits += 1;
-          score += 1.0;
+          damage_shard(collision.shard, BASE_HIT_DAMAGE, collision.point_x, collision.point_y, -collision.normal_x, -collision.normal_y, 1);
           BALL_HIT_COOLDOWN[ball] = 0.14;
-          if (SHARD_HEALTH[collision.shard] <= 0.0 && !SHARD_BROKEN[collision.shard]) {
-            SHARD_HEALTH[collision.shard] = 0.0;
-            SHARD_BROKEN[collision.shard] = 1;
-            total_breaks += 1;
-            recent_break_rate += 60.0 / RECENT_BREAK_RATE_TIME_CONSTANT_SECONDS;
-            score += 100.0;
-            record_event(3, collision.shard);
-          }
         }
+        apply_resonance(collision.shard);
       }
       remaining *= (1.0 - collision.time) > 0.0 ? 1.0 - collision.time : 0.0;
       collision_count += 1;
@@ -708,6 +803,23 @@ __attribute__((export_name("add_ball"))) int32_t add_ball(void) {
   return 1;
 }
 
+__attribute__((export_name("set_tech_resonance_state"))) void set_tech_resonance_state(int32_t enabled) {
+  resonance_unlocked = enabled ? 1 : 0;
+}
+
+__attribute__((export_name("set_tech_resonance"))) int32_t set_tech_resonance(int32_t enabled) {
+  if (enabled) {
+    if (resonance_unlocked || score < RESONANCE_COST) return 0;
+    score -= RESONANCE_COST;
+    resonance_unlocked = 1;
+    return 1;
+  }
+  if (!resonance_unlocked) return 0;
+  score += RESONANCE_COST;
+  resonance_unlocked = 0;
+  return 1;
+}
+
 __attribute__((export_name("set_simulation_meta"))) void set_simulation_meta(double time, double next_score, int32_t hits, int32_t breaks, double break_rate) {
   simulation_time = time;
   score = next_score;
@@ -748,6 +860,7 @@ __attribute__((export_name("set_shard_impact"))) void set_shard_impact(int32_t s
 }
 
 __attribute__((export_name("get_score"))) double get_score(void) { return score; }
+__attribute__((export_name("get_tech_resonance"))) int32_t get_tech_resonance(void) { return resonance_unlocked; }
 __attribute__((export_name("get_total_hits"))) int32_t get_total_hits(void) { return total_hits; }
 __attribute__((export_name("get_total_breaks"))) int32_t get_total_breaks(void) { return total_breaks; }
 __attribute__((export_name("get_shard_count"))) int32_t get_shard_count(void) { return shard_count; }

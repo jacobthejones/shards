@@ -36,6 +36,7 @@ const makeSimulation = (): Simulation => ({
   arrows: [{ id: 0, x: 1.2, y: -0.4, vx: 0.3, vy: -0.7, hue: 188, hitCooldown: 0.02 }],
   nextArrowId: 1,
   nextImpactId: 5,
+  unlockedTechs: [],
   score: 987,
   totalHits: 7,
   totalBreaks: 2,
@@ -64,6 +65,7 @@ test("a saved simulation includes its version and can be loaded", () => {
   assert.equal(loaded.arrows.length, 1);
   assert.equal(loaded.shards[0]?.health, 0.6);
   assert.equal(loaded.shards[0]?.impacts[0]?.id, 4);
+  assert.deepEqual(loaded.unlockedTechs, []);
 });
 
 test("every declared save version has a conversion path to the current version", () => {
@@ -78,6 +80,17 @@ test("every declared save version has a conversion path to the current version",
   }
 });
 
+test("a legacy V1 save loads without any unlocked technologies", () => {
+  const legacySave = saveStateForSimulation(makeSimulation()) as Record<string, unknown>;
+  delete legacySave.unlockedTechs;
+  legacySave.version = SaveStateVersion.V1;
+
+  const loaded = loadSaveState(JSON.stringify(legacySave));
+  assert.ok(loaded);
+  assert.equal(loaded.version, SaveStateVersion.V2);
+  assert.deepEqual(loaded.unlockedTechs, []);
+});
+
 test("invalid and unknown save versions are ignored", () => {
   assert.equal(loadSaveState(null), null);
   assert.equal(loadSaveState("not json"), null);
@@ -86,5 +99,5 @@ test("invalid and unknown save versions are ignored", () => {
 
 test("the version enum exposes the current save version", () => {
   assert.ok(SAVE_STATE_VERSIONS.includes(CURRENT_SAVE_STATE_VERSION));
-  assert.equal(CURRENT_SAVE_STATE_VERSION, SaveStateVersion.V1);
+  assert.equal(CURRENT_SAVE_STATE_VERSION, SaveStateVersion.V2);
 });

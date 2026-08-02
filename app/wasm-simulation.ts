@@ -8,11 +8,15 @@ import {
   type WorkerSimulationState,
 } from "./simulation";
 import type { SaveState } from "./save-state";
+import { TECH_IDS, type TechId } from "./tech-tree";
 
 type WasmExports = {
   initialize_real_simulation: (seed: number, fieldSeed: number, balls: number) => void;
   step_real_simulation: (steps: number) => void;
   add_ball: () => number;
+  set_tech_resonance: (enabled: number) => number;
+  set_tech_resonance_state: (enabled: number) => void;
+  get_tech_resonance: () => number;
   set_score: (score: number) => void;
   set_simulation_meta: (time: number, score: number, hits: number, breaks: number, rate: number) => void;
   set_random_state: (state: number) => void;
@@ -96,6 +100,7 @@ export class WasmSimulation {
   private paused = true;
   private awaitingStart = true;
   private nextArrowId = 1;
+  private resonanceUnlocked = false;
 
   private initializeMeta(ballCount: number) {
     this.arrowMeta = Array.from({ length: ballCount }, (_, index) => ({
@@ -103,6 +108,7 @@ export class WasmSimulation {
       hue: index === 0 ? 188 : 190 + (index - 1) * 22,
     }));
     this.nextArrowId = ballCount;
+    this.resonanceUnlocked = false;
     this.damagedShardIndices.clear();
     this.brokenShardIndices.clear();
   }
@@ -197,6 +203,7 @@ export class WasmSimulation {
       awaitingStart: this.awaitingStart,
       nextArrowId: this.nextArrowId,
       nextImpactId: this.wasm.get_next_impact_id(),
+      unlockedTechs: this.resonanceUnlocked ? [TECH_IDS.RESONANCE] : [],
       arrows: this.readArrows(),
       broken: [...this.brokenShardIndices].map((index) => this.staticShards[index].key),
       shards: this.readDynamicShards(),
@@ -208,6 +215,8 @@ export class WasmSimulation {
     this.wasm.initialize_real_simulation(seed, Number.NaN, 1);
     this.wasm.set_score(0);
     this.initializeMeta(1);
+    this.wasm.set_tech_resonance_state(0);
+    this.resonanceUnlocked = false;
     this.paused = true;
     this.awaitingStart = true;
     this.readStaticShards();
@@ -220,6 +229,8 @@ export class WasmSimulation {
     this.wasm.set_simulation_meta(save.time, save.score, save.totalHits, save.totalBreaks, save.recentBreakRate);
     this.wasm.set_random_state(save.randomState);
     this.wasm.set_next_impact_id(save.nextImpactId);
+    this.resonanceUnlocked = save.unlockedTechs.includes(TECH_IDS.RESONANCE);
+    this.wasm.set_tech_resonance_state(this.resonanceUnlocked ? 1 : 0);
     this.readStaticShards();
     this.wasm.set_all_shards_broken(0);
     this.brokenShardIndices.clear();
@@ -264,6 +275,13 @@ export class WasmSimulation {
     return true;
   }
 
+  setTech(tech: TechId, enabled: boolean): boolean {
+    if (tech !== TECH_IDS.RESONANCE) return false;
+    const changed = this.wasm.set_tech_resonance(enabled ? 1 : 0) !== 0;
+    if (changed) this.resonanceUnlocked = enabled;
+    return changed;
+  }
+
   step(): SimulationEvent[] {
     if (this.paused) return [];
     this.wasm.step_real_simulation(1);
@@ -274,7 +292,8 @@ export class WasmSimulation {
       this.damagedShardIndices.add(shardIndex);
       const shard = this.staticShards[shardIndex];
       const type = this.wasm.get_event_type(index);
-      if (type === 1) events.push({ type: "collision", hue: shard.hue, shardKey: shard.key });
+      if (type === 1) events.push({ type: "collision", hue: shard.hue, shardKey: shard.key, volume: 1 });
+      if (type === 2) events.push({ type: "collision", hue: shard.hue, shardKey: shard.key, volume: 0.5 });
       if (type === 3) {
         this.brokenShardIndices.add(shardIndex);
         this.damagedShardIndices.delete(shardIndex);

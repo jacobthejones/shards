@@ -294,6 +294,35 @@ button:focus-visible {
   opacity: 0.42;
 }
 
+.tech-tree-button {
+  width: 58px;
+  min-width: 58px;
+  justify-content: center;
+  padding: 9px;
+  color: var(--teal-bright);
+  font-size: 21px;
+  line-height: 1;
+  opacity: 0.42;
+}
+
+.tech-tree-button.available {
+  border-color: rgba(147, 225, 207, 0.45);
+  background: rgba(20, 65, 66, 0.48);
+  cursor: pointer;
+  opacity: 1;
+}
+
+.tech-glyph {
+  display: grid;
+  width: 29px;
+  height: 29px;
+  place-items: center;
+  border: 1px solid rgba(159, 216, 205, 0.2);
+  border-radius: 50%;
+  color: var(--teal);
+  font-size: 20px;
+}
+
 .upgrade-card > span:last-child {
   display: flex;
   flex-direction: column;
@@ -419,6 +448,121 @@ button:focus-visible {
   background: rgba(20, 65, 66, 0.7);
 }
 
+.tech-modal-backdrop {
+  position: absolute;
+  z-index: 4;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(2, 8, 13, 0.58);
+  backdrop-filter: blur(7px);
+}
+
+.tech-modal {
+  position: relative;
+  width: min(100%, 390px);
+  padding: 27px 28px 25px;
+  border: 1px solid rgba(159, 216, 205, 0.24);
+  background: rgba(7, 24, 30, 0.94);
+  box-shadow: 0 20px 70px rgba(0, 0, 0, 0.42);
+  text-align: center;
+}
+
+.tech-modal h2 {
+  margin: 13px 0 20px;
+  color: var(--ink);
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 21px;
+  font-weight: 400;
+  line-height: 1.2;
+}
+
+.tech-tree-grid {
+  display: flex;
+  justify-content: center;
+  min-height: 74px;
+  padding: 4px;
+}
+
+.tech-node {
+  display: grid;
+  width: 66px;
+  height: 66px;
+  place-items: center;
+  border: 1px solid rgba(159, 216, 205, 0.24);
+  border-radius: 50%;
+  background: rgba(5, 18, 24, 0.72);
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 27px;
+  transition: border-color 160ms ease, background 160ms ease, color 160ms ease, transform 160ms ease;
+}
+
+.tech-node:hover,
+.tech-node.available {
+  border-color: var(--teal);
+  background: rgba(20, 65, 66, 0.62);
+  color: var(--teal-bright);
+}
+
+.tech-node:hover { transform: translateY(-2px); }
+.tech-node.unlocked { border-color: var(--violet); color: var(--violet); }
+
+.tech-detail {
+  margin-top: 21px;
+  padding-top: 20px;
+  border-top: 1px solid var(--line);
+}
+
+.tech-detail h3 {
+  margin: 10px 0 8px;
+  color: var(--ink);
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 25px;
+  font-weight: 400;
+}
+
+.tech-detail p {
+  margin: 0 auto 18px;
+  max-width: 290px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.tech-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  min-width: 150px;
+  padding: 11px 16px;
+  border: 1px solid rgba(159, 216, 205, 0.3);
+  background: rgba(20, 65, 66, 0.42);
+  color: var(--teal-bright);
+  cursor: pointer;
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.tech-action:hover:not(:disabled) {
+  border-color: var(--teal);
+  background: rgba(20, 65, 66, 0.72);
+}
+
+.tech-action:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
+}
+
+.tech-action small {
+  color: var(--muted);
+  font-size: 8px;
+  letter-spacing: 0.04em;
+}
+
 @media (max-width: 760px) {
   .game-topbar { padding: 19px 17px; }
   .game-state { top: 76px; left: 18px; }
@@ -436,6 +580,7 @@ button:focus-visible {
   .upgrade-dock { width: 100%; }
   .upgrade-card { flex: 1; min-width: 0; padding-right: 7px; }
   .support-button { flex: 0 0 58px; width: 58px; min-width: 58px; padding: 9px; }
+  .tech-tree-button { flex: 0 0 58px; width: 58px; min-width: 58px; padding: 9px; }
   .upgrade-card strong { font-size: 8px; letter-spacing: 0.06em; }
   .corner-note { right: 18px; bottom: 8px; display: none; }
 }

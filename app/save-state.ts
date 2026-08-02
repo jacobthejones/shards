@@ -6,9 +6,10 @@ import {
 
 export enum SaveStateVersion {
   V1 = 1,
+  V2 = 2,
 }
 
-export const CURRENT_SAVE_STATE_VERSION = SaveStateVersion.V1;
+export const CURRENT_SAVE_STATE_VERSION = SaveStateVersion.V2;
 export const SAVE_STATE_STORAGE_KEY = "shards.game.save";
 export const SAVE_STATE_INTERVAL_MS = 15_000;
 
@@ -31,7 +32,12 @@ export type SaveStateV1 = {
   shards: DynamicShardState[];
 };
 
-export type SaveState = SaveStateV1;
+export type SaveStateV2 = Omit<SaveStateV1, "version"> & {
+  version: SaveStateVersion.V2;
+  unlockedTechs: string[];
+};
+
+export type SaveState = SaveStateV2;
 export type SaveStateMigration = (value: unknown) => SaveState;
 
 export const SAVE_STATE_VERSIONS = Object.values(SaveStateVersion).filter(
@@ -103,7 +109,7 @@ const migrateV1 = (value: unknown): SaveState => {
   }
 
   return {
-    version: SaveStateVersion.V1,
+    version: SaveStateVersion.V2,
     savedAt: finiteNumber(value.savedAt, "savedAt"),
     fieldSeed: finiteNumber(value.fieldSeed, "fieldSeed"),
     randomState: finiteNumber(value.randomState, "randomState"),
@@ -119,11 +125,23 @@ const migrateV1 = (value: unknown): SaveState => {
     arrows: value.arrows.map(arrowValue),
     broken: value.broken.map((key) => stringValue(key, "broken key")),
     shards: value.shards.map(dynamicShardValue),
+    unlockedTechs: [],
+  };
+};
+
+const migrateV2 = (value: unknown): SaveState => {
+  const migrated = migrateV1(value);
+  if (!isRecord(value) || !Array.isArray(value.unlockedTechs)) throw new Error("Invalid save tech state");
+  return {
+    ...migrated,
+    version: SaveStateVersion.V2,
+    unlockedTechs: value.unlockedTechs.map((tech) => stringValue(tech, "unlocked tech")),
   };
 };
 
 export const SAVE_STATE_MIGRATIONS: Record<SaveStateVersion, SaveStateMigration> = {
   [SaveStateVersion.V1]: migrateV1,
+  [SaveStateVersion.V2]: migrateV2,
 };
 
 const isSaveStateVersion = (value: unknown): value is SaveStateVersion => {
@@ -168,6 +186,7 @@ export const saveStateForSimulation = (sim: Simulation): SaveState => {
     awaitingStart: sim.awaitingStart,
     nextArrowId: sim.nextArrowId,
     nextImpactId: sim.nextImpactId,
+    unlockedTechs: [...sim.unlockedTechs],
     arrows: sim.arrows.map((arrow) => ({ ...arrow })),
     broken: [...sim.broken],
     shards,

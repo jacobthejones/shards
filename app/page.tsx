@@ -33,9 +33,16 @@ import {
   saveStateForSimulation,
   type SaveState,
 } from "./save-state";
+import {
+  TECH_TREE,
+  techHasUnlockedDependents,
+  techIsUnlocked,
+  type TechDefinition,
+  type TechId,
+} from "./tech-tree";
 
 type InteractiveWorkerCommand = Exclude<SimulationWorkerCommand, { type: "load" }>;
-type PendingWorkerCommandType = Exclude<InteractiveWorkerCommand["type"], "addBall" | "ping">;
+type PendingWorkerCommandType = Exclude<InteractiveWorkerCommand["type"], "addBall" | "ping" | "setTech">;
 
 const AUDIO_GAIN = 9;
 
@@ -100,6 +107,7 @@ const createRenderSimulation = (): Simulation => ({
   arrows: [],
   nextArrowId: 1,
   nextImpactId: 1,
+  unlockedTechs: [],
   score: STARTING_LUMENS,
   totalHits: 0,
   totalBreaks: 0,
@@ -135,6 +143,9 @@ export default function Home() {
   });
   const [audioOn, setAudioOn] = useState(true);
   const [supportOpen, setSupportOpen] = useState(false);
+  const [techTreeOpen, setTechTreeOpen] = useState(false);
+  const [selectedTechId, setSelectedTechId] = useState<TechId | null>(null);
+  const [unlockedTechs, setUnlockedTechs] = useState<string[]>([]);
 
   if (simRef.current == null) simRef.current = createRenderSimulation();
 
@@ -168,13 +179,16 @@ export default function Home() {
   }, [startSimulation, togglePause]);
 
   useEffect(() => {
-    if (!supportOpen) return;
+    if (!supportOpen && !techTreeOpen) return;
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setSupportOpen(false);
+      if (event.key !== "Escape") return;
+      setSupportOpen(false);
+      setTechTreeOpen(false);
+      setSelectedTechId(null);
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [supportOpen]);
+  }, [supportOpen, techTreeOpen]);
 
   const toggleAudio = async () => {
     const sim = simRef.current;
@@ -202,6 +216,25 @@ export default function Home() {
     playTone(sim, 523.25, 0.3, 0.04);
   };
 
+  const selectedTech = selectedTechId
+    ? TECH_TREE.find((tech) => tech.id === selectedTechId) ?? null
+    : null;
+  const canPurchaseTech = (tech: TechDefinition) => {
+    return !techIsUnlocked(unlockedTechs, tech.id)
+      && hud.score >= tech.cost
+      && tech.dependsOn.every((dependency) => techIsUnlocked(unlockedTechs, dependency));
+  };
+  const techAvailable = TECH_TREE.some(canPurchaseTech);
+
+  const changeTech = (tech: TechDefinition, enabled: boolean) => {
+    const sim = simRef.current;
+    if (!sim) return;
+    if (enabled && !canPurchaseTech(tech)) return;
+    if (!enabled && (!techIsUnlocked(unlockedTechs, tech.id) || techHasUnlockedDependents(unlockedTechs, tech))) return;
+    sendWorkerCommand({ type: "setTech", tech: tech.id, enabled });
+    playTone(sim, enabled ? 659.25 : 493.88, 0.24, 0.04);
+  };
+
   const resetRun = () => {
     if (!window.confirm("Reset this run? Your current progress will be lost.")) return;
     const sim = simRef.current;
@@ -216,6 +249,9 @@ export default function Home() {
     emptyCircleCenterYRef.current = 0;
     setHud({ score: STARTING_LUMENS, arrows: 1, shardsBroken: 0, rate: 0, paused: true });
     setAudioOn(true);
+    setUnlockedTechs([]);
+    setTechTreeOpen(false);
+    setSelectedTechId(null);
   };
 
   useEffect(() => {
@@ -459,7 +495,7 @@ export default function Home() {
       events.forEach((event) => {
         if (event.type === "collision") {
           const shard = sim.shards.get(event.shardKey);
-          playTone(sim, shard ? shardCollisionFrequency(shard) : 411, 0.08, 0.012);
+          playTone(sim, shard ? shardCollisionFrequency(shard) : 411, 0.08, 0.012 * (event.volume ?? 1));
           return;
         }
         if (event.type === "hit") {
@@ -477,6 +513,9 @@ export default function Home() {
     const applyWorkerState = (state: Extract<SimulationWorkerMessage, { type: "state" | "ready" }>['state'], events: SimulationEvent[]) => {
       const wasPaused = sim.paused;
       const previousArrowCount = sim.arrows.length;
+      const previousUnlockedTechs = sim.unlockedTechs.join(",");
+      const nextUnlockedTechs = state.unlockedTechs;
+      const techStateChanged = previousUnlockedTechs !== nextUnlockedTechs.join(",");
       sim.time = state.time;
       sim.fieldSeed = state.fieldSeed;
       sim.randomState = state.randomState;
@@ -488,6 +527,8 @@ export default function Home() {
       sim.awaitingStart = state.awaitingStart;
       sim.nextArrowId = state.nextArrowId;
       sim.nextImpactId = state.nextImpactId;
+      sim.unlockedTechs = [...nextUnlockedTechs];
+      if (techStateChanged) setUnlockedTechs([...nextUnlockedTechs]);
       sim.arrows = state.arrows.map((arrow) => ({ ...arrow }));
       sim.broken = new Set(state.broken);
       const dynamicShardKeys = new Set(state.shards.map((dynamicShard) => dynamicShard.key));
@@ -507,9 +548,10 @@ export default function Home() {
       });
       if (events.length > 0) handleEvents(events);
       if (previousArrowCount > 0 && state.arrows.length > previousArrowCount) saveCurrentGame();
+      if (techStateChanged) saveCurrentGame();
 
       const now = performance.now();
-      if (wasPaused !== state.paused || now - hudTime >= 180) {
+      if (wasPaused !== state.paused || techStateChanged || now - hudTime >= 180) {
         updateHud();
         hudTime = now;
       }
@@ -529,7 +571,7 @@ export default function Home() {
       pendingWorkerCommand = null;
     };
     const commandHandler = (command: InteractiveWorkerCommand) => {
-      if (command.type !== "addBall" && command.type !== "ping") {
+      if (command.type !== "addBall" && command.type !== "ping" && command.type !== "setTech") {
         pendingWorkerCommand = {
           type: command.type,
           ...(command.type === "togglePause" ? { targetPaused: !sim.paused } : {}),
@@ -652,6 +694,14 @@ export default function Home() {
 
       <div className="bottom-hud">
         <div className="upgrade-dock" aria-label="Upgrades">
+          <button
+            className={`upgrade-card tech-tree-button ${techAvailable ? "available" : ""}`}
+            onClick={() => { setTechTreeOpen(true); setSelectedTechId(null); }}
+            aria-label="Open tech tree"
+            title="Open tech tree"
+          >
+            <span className="tech-glyph" aria-hidden="true">⌘</span>
+          </button>
           <button className={`upgrade-card ${canBuyArrow ? "available" : ""}`} onClick={buyArrow} disabled={!canBuyArrow}>
             <span className="upgrade-icon ball-glyph">+</span>
             <span><strong>Add ball</strong><small>{formatScore(arrowCost)} ✦</small></span>
@@ -661,6 +711,55 @@ export default function Home() {
       </div>
 
       <div className="corner-note"><span>SPACE</span> pause &nbsp;·&nbsp; shards heal while untouched</div>
+
+      {techTreeOpen && (
+        <div className="tech-modal-backdrop" onClick={() => { setTechTreeOpen(false); setSelectedTechId(null); }}>
+          <section className="tech-modal" role="dialog" aria-modal="true" aria-labelledby="tech-tree-title" onClick={(event) => event.stopPropagation()}>
+            <button className="support-close" onClick={() => { setTechTreeOpen(false); setSelectedTechId(null); }} aria-label="Close tech tree">×</button>
+            <span className="support-kicker">Development</span>
+            <h2 id="tech-tree-title">Tech tree</h2>
+            <div className="tech-tree-grid" aria-label="Available technologies">
+              {TECH_TREE.map((tech) => {
+                const unlocked = techIsUnlocked(unlockedTechs, tech.id);
+                return (
+                  <button
+                    key={tech.id}
+                    className={`tech-node ${unlocked ? "unlocked" : ""} ${canPurchaseTech(tech) ? "available" : ""}`}
+                    onClick={() => setSelectedTechId(tech.id)}
+                    aria-label={`${tech.title}${unlocked ? " unlocked" : " technology"}`}
+                  >
+                    <span aria-hidden="true">{tech.icon}</span>
+                  </button>
+                );
+              })}
+            </div>
+            {selectedTech && (
+              <div className="tech-detail" role="region" aria-labelledby="selected-tech-title">
+                <span className="support-kicker">Technology</span>
+                <h3 id="selected-tech-title">{selectedTech.title}</h3>
+                <p>{selectedTech.description}</p>
+                {techIsUnlocked(unlockedTechs, selectedTech.id) ? (
+                  <button
+                    className="tech-action"
+                    onClick={() => changeTech(selectedTech, false)}
+                    disabled={techHasUnlockedDependents(unlockedTechs, selectedTech)}
+                  >
+                    Refund <small>{formatScore(selectedTech.cost)} ✦</small>
+                  </button>
+                ) : (
+                  <button
+                    className="tech-action"
+                    onClick={() => changeTech(selectedTech, true)}
+                    disabled={!canPurchaseTech(selectedTech)}
+                  >
+                    Purchase <small>{formatScore(selectedTech.cost)} ✦</small>
+                  </button>
+                )}
+              </div>
+            )}
+          </section>
+        </div>
+      )}
 
       {supportOpen && (
         <div className="support-modal-backdrop" onClick={() => setSupportOpen(false)}>

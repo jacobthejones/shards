@@ -46,6 +46,33 @@ test("the C++ runtime preserves the fixed ball speed and upgrade cost", async ()
   assert.equal(wasm.add_ball(), 0);
 });
 
+test("Resonance costs and refunds 10,000 lumens and damages touching shards", async () => {
+  const wasm = await loadRuntime();
+  wasm.initialize_real_simulation(7, 77, 1);
+  wasm.set_score(10_000);
+  assert.equal(wasm.set_tech_resonance(1), 1);
+  assert.equal(wasm.get_tech_resonance(), 1);
+  assert.equal(wasm.get_score(), 0);
+  assert.equal(wasm.set_tech_resonance(0), 1);
+  assert.equal(wasm.get_tech_resonance(), 0);
+  assert.equal(wasm.get_score(), 10_000);
+
+  wasm.set_score(10_000);
+  assert.equal(wasm.set_tech_resonance(1), 1);
+  let resonanceEvents = 0;
+  let resonanceDamagedShard = false;
+  for (let step = 0; step < 600; step += 1) {
+    wasm.step_real_simulation(1);
+    for (let index = 0; index < wasm.get_event_count(); index += 1) {
+      if (wasm.get_event_type(index) !== 2) continue;
+      resonanceEvents += 1;
+      if (wasm.get_shard_health(wasm.get_event_shard(index)) < 0.999) resonanceDamagedShard = true;
+    }
+  }
+  assert.ok(resonanceEvents > 0);
+  assert.equal(resonanceDamagedShard, true);
+});
+
 test("the C++ runtime emits collision events and advances simulation time", async () => {
   const wasm = await loadRuntime();
   wasm.initialize_real_simulation(7, 77, 1);

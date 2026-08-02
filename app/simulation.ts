@@ -31,6 +31,7 @@ export type Simulation = {
   arrows: Arrow[];
   nextArrowId: number;
   nextImpactId: number;
+  unlockedTechs: string[];
   score: number;
   totalHits: number;
   totalBreaks: number;
@@ -70,6 +71,7 @@ export type SimulationEvent = {
   type: "collision" | "hit" | "break";
   hue: number;
   shardKey: string;
+  volume?: number;
 };
 
 export type StaticShardState = Pick<Shard, "key" | "gx" | "gy" | "sx" | "sy" | "points" | "hue" | "seed" | "fieldSeed">;
@@ -88,6 +90,7 @@ export type WorkerSimulationState = {
   awaitingStart: boolean;
   nextArrowId: number;
   nextImpactId: number;
+  unlockedTechs: string[];
   arrows: Arrow[];
   broken: string[];
   shards: DynamicShardState[];
@@ -106,6 +109,7 @@ export type SimulationWorkerCommand =
   | { type: "togglePause" }
   | { type: "reset" }
   | { type: "addBall" }
+  | { type: "setTech"; tech: "resonance"; enabled: boolean }
   | { type: "setBallCount"; count: number }
   | { type: "load"; save: import("./save-state").SaveState };
 

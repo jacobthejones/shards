@@ -31,6 +31,7 @@ test("server-renders the shards experience", async () => {
   assert.match(html, /upgrade-card/);
   assert.match(html, /Add ball/);
   assert.match(html, /300(?:<!-- -->)? ✦/);
+  assert.match(html, /Open tech tree/);
   assert.doesNotMatch(html, /prism tip|dampener/i);
   assert.match(html, /sound/);
   assert.match(html, /aria-label="Live shards Voronoi field"/);
@@ -38,13 +39,15 @@ test("server-renders the shards experience", async () => {
 });
 
 test("keeps the prototype self-contained", async () => {
-  const [page, simulation, worker, layout, css, packageJson] = await Promise.all([
+  const [page, simulation, worker, layout, css, packageJson, saveState, techTree] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/simulation.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/simulation.worker.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
     readFile(new URL("../package.json", import.meta.url), "utf8"),
+    readFile(new URL("../app/save-state.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/tech-tree.ts", import.meta.url), "utf8"),
   ]);
 
   assert.match(page, /^"use client";/);
@@ -69,6 +72,8 @@ test("keeps the prototype self-contained", async () => {
   assert.doesNotMatch(page, /holeRadius|setLineDash/);
   assert.match(page, /ballRadius/);
   assert.match(page, /arrows: 1/);
+  assert.match(page, /Open tech tree/);
+  assert.match(page, /setTech/);
   assert.doesNotMatch(page, /prism tip|dampener|ball size|BALL_SIZE_COST|buyBallSize/i);
   assert.match(simulation, /buildVoronoiCell/);
   assert.match(simulation, /impactVoronoiCellsFor/);
@@ -86,6 +91,7 @@ test("keeps the prototype self-contained", async () => {
   assert.match(simulation, /ballRadius/);
   assert.match(simulation, /export const ballCostForCount/);
   assert.match(simulation, /BALL_COST_GROWTH/);
+  assert.match(simulation, /unlockedTechs/);
   assert.doesNotMatch(simulation, /arrows\.length >= 8/);
   assert.doesNotMatch(simulation, /new Set\(\[keyFor\(0, 0\)/);
   assert.doesNotMatch(simulation, /prism tip|dampener|ball size|BALL_SIZE_COST|buyBallSize/i);
@@ -98,5 +104,11 @@ test("keeps the prototype self-contained", async () => {
   assert.doesNotMatch(worker, /createSimulation|stepSimulation|buyBall/);
   assert.match(worker, /case "ping"/);
   assert.match(worker, /case "load"/);
+  assert.match(worker, /case "setTech"/);
   assert.match(packageJson, /build:wasm/);
+  assert.match(saveState, /SaveStateVersion\.V2/);
+  assert.match(saveState, /SaveStateVersion\.V1/);
+  assert.match(saveState, /unlockedTechs/);
+  assert.match(techTree, /RESONANCE_COST = 10_000/);
+  assert.match(techTree, /Resonance/);
 });
