@@ -125,4 +125,5 @@ test("keeps the prototype self-contained", async () => {
   assert.match(techTree, /Conduction/);
   assert.match(techTree, /icon: "resonance"/);
   assert.match(techTree, /icon: "conduction"/);
+  assert.match(css, /tech-branch-line/);
 });

@@ -485,9 +485,23 @@ button:focus-visible {
 
 .tech-tree-grid {
   display: flex;
+  flex-direction: column;
+  align-items: center;
   justify-content: center;
-  min-height: 74px;
+  min-height: 150px;
   padding: 4px;
+}
+
+.tech-tree-entry {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.tech-branch-line {
+  width: 1px;
+  height: 18px;
+  background: rgba(159, 216, 205, 0.32);
 }
 
 .tech-node {

@@ -801,18 +801,20 @@ export default function Home() {
             <span className="support-kicker">Development</span>
             <h2 id="tech-tree-title">Tech tree</h2>
             <div className="tech-tree-grid" aria-label="Available technologies">
-              {TECH_TREE.map((tech) => {
+              {TECH_TREE.map((tech, index) => {
                 const unlocked = techIsUnlocked(unlockedTechs, tech.id);
                 return (
-                  <button
-                    key={tech.id}
-                    className={`tech-node ${unlocked ? "unlocked" : ""} ${canPurchaseTech(tech) ? "available" : ""}`}
-                    onClick={() => setSelectedTechId(tech.id)}
-                    aria-label={`${tech.title}${unlocked ? " unlocked" : " technology"}`}
-                  >
-                    {tech.icon === "resonance" && <ResonanceIcon />}
-                    {tech.icon === "conduction" && <ConductionIcon />}
-                  </button>
+                  <div className="tech-tree-entry" key={tech.id}>
+                    {index > 0 && <span className="tech-branch-line" aria-hidden="true" />}
+                    <button
+                      className={`tech-node ${unlocked ? "unlocked" : ""} ${canPurchaseTech(tech) ? "available" : ""}`}
+                      onClick={() => setSelectedTechId(tech.id)}
+                      aria-label={`${tech.title}${unlocked ? " unlocked" : " technology"}`}
+                    >
+                      {tech.icon === "resonance" && <ResonanceIcon />}
+                      {tech.icon === "conduction" && <ConductionIcon />}
+                    </button>
+                  </div>
                 );
               })}
             </div>

@@ -21,20 +21,20 @@ export type TechDefinition = {
 
 export const TECH_TREE: TechDefinition[] = [
   {
-    id: TECH_IDS.RESONANCE,
-    title: "Resonance",
-    description: "When a ball strikes a shard, every shard touching it absorbs a softer echo of the impact.",
-    icon: "resonance",
-    cost: RESONANCE_COST,
-    dependsOn: [],
-  },
-  {
     id: TECH_IDS.CONDUCTION,
     title: "Conduction",
     description: "The resonance travels one layer farther, reaching second-neighbor shards with a softer echo.",
     icon: "conduction",
     cost: CONDUCTION_COST,
     dependsOn: [TECH_IDS.RESONANCE],
+  },
+  {
+    id: TECH_IDS.RESONANCE,
+    title: "Resonance",
+    description: "When a ball strikes a shard, every shard touching it absorbs a softer echo of the impact.",
+    icon: "resonance",
+    cost: RESONANCE_COST,
+    dependsOn: [],
   },
 ];
 
