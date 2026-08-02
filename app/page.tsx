@@ -573,17 +573,17 @@ export default function Home() {
       });
       propagationSounds.forEach(({ voice, frequency, volume }) => {
         if (voice === "resonance") {
-          playHarmonicTone(sim, frequency, 0.12, 0.012 * volume, [
+          playHarmonicTone(sim, frequency, 0.1, 0.012 * volume, [
             { ratio: 1, gain: 1 },
-            { ratio: 2, gain: 0.24 },
-            { ratio: 3, gain: 0.06 },
+            { ratio: 1.5, gain: 0.13 },
+            { ratio: 2, gain: 0.18 },
           ]);
           return;
         }
-        playHarmonicTone(sim, frequency, 0.1, 0.012 * volume, [
+        playHarmonicTone(sim, frequency, 0.12, 0.012 * volume, [
           { ratio: 1, gain: 1 },
-          { ratio: 1.5, gain: 0.13 },
-          { ratio: 2, gain: 0.18 },
+          { ratio: 2, gain: 0.24 },
+          { ratio: 3, gain: 0.06 },
         ]);
       });
     };
