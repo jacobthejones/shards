@@ -1,8 +1,4 @@
 import {
-  SHARD_MAX_HEALTH,
-  createSimulation,
-  createRng,
-  refreshShardHealth,
   type Arrow,
   type DynamicShardState,
   type Simulation,
@@ -150,17 +146,13 @@ export const loadSaveState = (serialized: string | null): SaveState | null => {
 export const saveStateForSimulation = (sim: Simulation): SaveState => {
   const shards = [...sim.shards.values()]
     .filter((shard) => !sim.broken.has(shard.key) && (shard.health < shard.maxHealth || shard.impacts.length > 0))
-    .flatMap((shard) => {
-      refreshShardHealth(sim, shard);
-      if (shard.health >= shard.maxHealth && shard.impacts.length === 0) return [];
-      return [{
-        key: shard.key,
-        health: shard.health,
-        maxHealth: shard.maxHealth,
-        healthUpdatedAt: shard.healthUpdatedAt,
-        impacts: shard.impacts.map((impact) => ({ ...impact })),
-      }];
-    });
+    .map((shard) => ({
+      key: shard.key,
+      health: shard.health,
+      maxHealth: shard.maxHealth,
+      healthUpdatedAt: shard.healthUpdatedAt,
+      impacts: shard.impacts.map((impact) => ({ ...impact })),
+    }));
 
   return {
     version: CURRENT_SAVE_STATE_VERSION,
@@ -180,39 +172,4 @@ export const saveStateForSimulation = (sim: Simulation): SaveState => {
     broken: [...sim.broken],
     shards,
   };
-};
-
-export const simulationFromSaveState = (save: SaveState): Simulation => {
-  const sim = createSimulation(1, save.paused, save.fieldSeed);
-  sim.random = createRng(save.randomState);
-  sim.randomState = save.randomState;
-  sim.time = save.time;
-  sim.score = save.score;
-  sim.totalHits = save.totalHits;
-  sim.totalBreaks = save.totalBreaks;
-  sim.recentBreakRate = save.recentBreakRate;
-  // A restored run must wait for a user gesture so browser audio can unlock first.
-  sim.paused = true;
-  sim.awaitingStart = true;
-  sim.nextArrowId = save.nextArrowId;
-  sim.nextImpactId = save.nextImpactId;
-  sim.arrows = save.arrows.map((arrow) => ({ ...arrow }));
-  sim.broken = new Set(save.broken);
-
-  sim.shards.forEach((shard) => {
-    if (sim.broken.has(shard.key)) {
-      shard.health = 0;
-      shard.impacts = [];
-      shard.healthUpdatedAt = sim.time;
-    }
-  });
-  save.shards.forEach((savedShard) => {
-    const shard = sim.shards.get(savedShard.key);
-    if (!shard || sim.broken.has(shard.key)) return;
-    shard.health = savedShard.health;
-    shard.maxHealth = savedShard.maxHealth || SHARD_MAX_HEALTH;
-    shard.healthUpdatedAt = savedShard.healthUpdatedAt;
-    shard.impacts = savedShard.impacts.map((impact) => ({ ...impact }));
-  });
-  return sim;
 };

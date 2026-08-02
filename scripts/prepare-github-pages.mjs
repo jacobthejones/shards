@@ -24,7 +24,8 @@ for (const filePath of await collectFiles(outputRoot)) {
   const source = await readFile(filePath, "utf8");
   const rewritten = source
     .replaceAll("/assets/", "/shards/assets/")
-    .replaceAll("/favicon.svg", "/shards/favicon.svg");
+    .replaceAll("/favicon.svg", "/shards/favicon.svg")
+    .replaceAll("/simulation.wasm", "/shards/simulation.wasm");
 
   if (rewritten !== source) await writeFile(filePath, rewritten);
 }

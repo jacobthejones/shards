@@ -9,25 +9,50 @@ import {
   loadSaveState,
   saveStateForSimulation,
   serializeSaveState,
-  simulationFromSaveState,
 } from "../app/save-state";
-import { createSimulation, keyFor } from "../app/simulation";
+import { BASE_BALL_RADIUS, type Simulation } from "../app/simulation";
+
+const makeSimulation = (): Simulation => ({
+  shards: new Map([[
+    "0:0",
+    {
+      key: "0:0",
+      gx: 0,
+      gy: 0,
+      sx: 0,
+      sy: 0,
+      points: [[-0.5, -0.5], [0.5, -0.5], [0.5, 0.5], [-0.5, 0.5]],
+      health: 0.6,
+      maxHealth: 1,
+      healthUpdatedAt: 3,
+      impacts: [{ id: 4, x: 0.5, y: 0, inwardX: -1, inwardY: 0, strength: 0.4 }],
+      hue: 188,
+      seed: 0.5,
+      fieldSeed: 1234,
+    },
+  ]]),
+  broken: new Set(),
+  fieldSeed: 1234,
+  arrows: [{ id: 0, x: 1.2, y: -0.4, vx: 0.3, vy: -0.7, hue: 188, hitCooldown: 0.02 }],
+  nextArrowId: 1,
+  nextImpactId: 5,
+  score: 987,
+  totalHits: 7,
+  totalBreaks: 2,
+  recentBreakRate: 1.5,
+  time: 42.5,
+  paused: false,
+  awaitingStart: false,
+  ballRadius: BASE_BALL_RADIUS,
+  random: () => 0.5,
+  randomState: 5678,
+  audioEnabled: true,
+  audioUnlocked: false,
+  audio: null,
+});
 
 test("a saved simulation includes its version and can be loaded", () => {
-  const simulation = createSimulation(1234, false);
-  simulation.score = 987;
-  simulation.time = 42.5;
-  simulation.arrows.push({
-    id: 9,
-    x: 1.2,
-    y: -0.4,
-    vx: 0.3,
-    vy: -0.7,
-    hue: 240,
-    hitCooldown: 0.02,
-  });
-
-  const serialized = serializeSaveState(saveStateForSimulation(simulation));
+  const serialized = serializeSaveState(saveStateForSimulation(makeSimulation()));
   const parsed = JSON.parse(serialized) as { version: SaveStateVersion };
   const loaded = loadSaveState(serialized);
 
@@ -36,19 +61,13 @@ test("a saved simulation includes its version and can be loaded", () => {
   assert.equal(loaded.version, CURRENT_SAVE_STATE_VERSION);
   assert.equal(loaded.score, 987);
   assert.equal(loaded.time, 42.5);
-  assert.equal(loaded.arrows.length, 2);
-
-  const restored = simulationFromSaveState(loaded);
-  assert.equal(restored.fieldSeed, simulation.fieldSeed);
-  assert.equal(restored.randomState, simulation.randomState);
-  assert.equal(restored.score, simulation.score);
-  assert.equal(restored.time, simulation.time);
-  assert.deepEqual(restored.arrows, simulation.arrows);
-  assert.ok(restored.shards.has(keyFor(3, -4)));
+  assert.equal(loaded.arrows.length, 1);
+  assert.equal(loaded.shards[0]?.health, 0.6);
+  assert.equal(loaded.shards[0]?.impacts[0]?.id, 4);
 });
 
 test("every declared save version has a conversion path to the current version", () => {
-  const baseSave = saveStateForSimulation(createSimulation(5678));
+  const baseSave = saveStateForSimulation(makeSimulation());
 
   for (const version of SAVE_STATE_VERSIONS) {
     assert.equal(typeof SAVE_STATE_MIGRATIONS[version], "function", `missing migration for version ${version}`);

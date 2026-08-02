@@ -1,12 +1,6 @@
 import assert from "node:assert/strict";
-import { execFile } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
-import { promisify } from "node:util";
-import { fileURLToPath } from "node:url";
-
-const execFileAsync = promisify(execFile);
-const projectRoot = fileURLToPath(new URL("../", import.meta.url));
 
 async function render() {
   const serverUrl = new URL("../dist/server/index.js", import.meta.url);
@@ -78,25 +72,19 @@ test("keeps the prototype self-contained", async () => {
   assert.doesNotMatch(page, /prism tip|dampener|ball size|BALL_SIZE_COST|buyBallSize/i);
   assert.match(simulation, /buildVoronoiCell/);
   assert.match(simulation, /impactVoronoiCellsFor/);
-  assert.match(simulation, /cellsIntersectingCircle/);
-  assert.match(simulation, /collisionFor/);
+  assert.doesNotMatch(simulation, /createSimulation|stepSimulation|collisionFor|buyBall|refreshShardHealth/);
   assert.match(simulation, /emptyRegionBounds/);
   assert.match(simulation, /emptyRegionEnclosingCircle/);
-  assert.match(simulation, /type: "collision"/);
   assert.match(simulation, /const STARTING_LUMENS = 0/);
   assert.match(simulation, /const SHARD_MAX_HEALTH = 1/);
   assert.match(simulation, /const BASE_HIT_DAMAGE = 0\.2/);
   assert.match(simulation, /const SHARD_REGENERATION_RATE = 0\.01/);
   assert.match(simulation, /fieldSeed/);
   assert.match(simulation, /randomState/);
-  assert.match(simulation, /sim\.score \+= 1/);
-  assert.match(simulation, /sim\.score \+= 100/);
   assert.match(simulation, /recentBreakRate/);
   assert.match(simulation, /RECENT_BREAK_RATE_TIME_CONSTANT_SECONDS/);
   assert.match(simulation, /ballRadius/);
-  assert.match(simulation, /const initialDirection = random\(\) \* TAU/);
-  assert.match(simulation, /BOUNCE_JITTER_RADIANS/);
-  assert.match(simulation, /export const ballCost/);
+  assert.match(simulation, /export const ballCostForCount/);
   assert.match(simulation, /BALL_COST_GROWTH/);
   assert.doesNotMatch(simulation, /arrows\.length >= 8/);
   assert.doesNotMatch(simulation, /new Set\(\[keyFor\(0, 0\)/);
@@ -106,15 +94,9 @@ test("keeps the prototype self-contained", async () => {
   assert.match(css, /prefers-reduced-motion|@keyframes sound-wave/);
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
   assert.match(worker, /self\.onmessage/);
+  assert.match(worker, /WasmSimulation/);
+  assert.doesNotMatch(worker, /createSimulation|stepSimulation|buyBall/);
   assert.match(worker, /case "ping"/);
   assert.match(worker, /case "load"/);
-  assert.match(worker, /sim\.score = ballCost\(sim\)/);
-});
-
-test("keeps the headless balance strategy runnable", async () => {
-  const { stdout } = await execFileAsync("npm", ["run", "balance", "--", "--runs=1", "--seconds=1"], {
-    cwd: projectRoot,
-  });
-  assert.match(stdout, /strategy: buy Add ball whenever affordable/);
-  assert.doesNotMatch(stdout, /Ball speed|max upgrades reached/);
+  assert.match(packageJson, /build:wasm/);
 });

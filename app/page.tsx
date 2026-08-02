@@ -4,23 +4,18 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
   BASE_BALL_RADIUS,
-  FIXED_TIMESTEP,
   INITIAL_VIEW_RADIUS,
   STARTING_LUMENS,
   TAU,
   ballCostForCount,
-  buyBall,
-  createSimulation,
   emptyRegionBounds,
   emptyRegionEnclosingCircle,
   getHud,
   impactVoronoiCellsFor,
   keyFor,
-  refreshShardHealth,
   shardBreakFrequency,
   shardCollisionFrequency,
   shardPoints,
-  stepSimulation,
   type Arrow,
   type Shard,
   type Simulation,
@@ -35,7 +30,6 @@ import {
   SAVE_STATE_STORAGE_KEY,
   loadSaveState,
   serializeSaveState,
-  simulationFromSaveState,
   saveStateForSimulation,
   type SaveState,
 } from "./save-state";
@@ -200,7 +194,7 @@ export default function Home() {
 
   const buyArrow = () => {
     const sim = simRef.current;
-    if (!sim || sim.score < ballCostForCount(sim.arrows.length)) {
+    if (!sim || hud.score < ballCostForCount(hud.arrows)) {
       if (sim) setHud(getHud(sim));
       return;
     }
@@ -230,7 +224,7 @@ export default function Home() {
     if (!canvas || !sim) return;
     const context = canvas.getContext("2d");
     if (!context) return;
-    let worker: Worker | null = null;
+    const worker: Worker = new Worker(new URL("./simulation.worker.ts", import.meta.url), { type: "module" });
     let savedGameState: SaveState | null = null;
     try {
       savedGameState = loadSaveState(window.localStorage.getItem(SAVE_STATE_STORAGE_KEY));
@@ -247,18 +241,6 @@ export default function Home() {
       }
     };
 
-    try {
-      if (typeof Worker !== "undefined") {
-        worker = new Worker(new URL("./simulation.worker.ts", import.meta.url), { type: "module" });
-      }
-    } catch {
-      worker = null;
-    }
-    if (!worker) {
-      Object.assign(sim, savedGameState ? simulationFromSaveState(savedGameState) : createSimulation());
-      awaitingStartRef.current = sim.awaitingStart;
-    }
-
     let width = 0;
     let height = 0;
     let dpr = 1;
@@ -269,13 +251,7 @@ export default function Home() {
     let renderMs = 0;
     let renderFrames = 0;
     let latestWorkerMetrics: WorkerMetrics | null = null;
-    let fallbackAccumulator = 0;
-    let fallbackPhysicsMs = 0;
-    let fallbackPhysicsSteps = 0;
-    let fallbackSimulatedSeconds = 0;
-    const fallbackDamagedShardKeys = new Set<string>();
     const metricsEnabled = new URLSearchParams(window.location.search).has("metrics");
-    const benchmarkBallCount = Number(new URLSearchParams(window.location.search).get("balls"));
     let pendingWorkerCommand: {
       type: PendingWorkerCommandType;
       targetCount?: number;
@@ -460,14 +436,9 @@ export default function Home() {
       const now = performance.now();
       if (metricsEnabled && now - metricsWindowStartedAt >= 1000) {
         const windowMs = now - metricsWindowStartedAt;
-        const physicsMetrics = latestWorkerMetrics ?? (worker ? null : {
-          windowMs,
-          physicsMs: fallbackPhysicsMs,
-          physicsSteps: fallbackPhysicsSteps,
-          simulatedSeconds: fallbackSimulatedSeconds,
-        });
+        const physicsMetrics = latestWorkerMetrics;
         const metrics = {
-          simulationMode: worker ? "worker" : "main",
+          simulationMode: "worker",
           windowMs,
           physicsMs: physicsMetrics?.physicsMs ?? 0,
           physicsSteps: physicsMetrics?.physicsSteps ?? 0,
@@ -481,9 +452,6 @@ export default function Home() {
         metricsWindowStartedAt = now;
         renderMs = 0;
         renderFrames = 0;
-        fallbackPhysicsMs = 0;
-        fallbackPhysicsSteps = 0;
-        fallbackSimulatedSeconds = 0;
       }
     };
 
@@ -547,20 +515,6 @@ export default function Home() {
       }
     };
 
-    const refreshFallbackDamagedShards = () => {
-      fallbackDamagedShardKeys.forEach((key) => {
-        const shard = sim.shards.get(key);
-        if (shard) refreshShardHealth(sim, shard);
-      });
-      fallbackDamagedShardKeys.forEach((key) => {
-        const shard = sim.shards.get(key);
-        if (!shard || sim.broken.has(key) || (shard.impacts.length === 0 && shard.health >= shard.maxHealth)) {
-          fallbackDamagedShardKeys.delete(key);
-        }
-      });
-    };
-
-    let activateFallback = () => {};
     const acknowledgeWorkerState = (state: Extract<SimulationWorkerMessage, { type: "state" | "ready" }>['state']) => {
       if (!pendingWorkerCommand) return;
       const satisfied = pendingWorkerCommand.type === "start"
@@ -575,81 +529,21 @@ export default function Home() {
       pendingWorkerCommand = null;
     };
     const commandHandler = (command: InteractiveWorkerCommand) => {
-      if (worker) {
-        if (command.type === "addBall" || command.type === "ping") {
-          worker.postMessage(command);
-          return;
-        }
+      if (command.type !== "addBall" && command.type !== "ping") {
         pendingWorkerCommand = {
           type: command.type,
           ...(command.type === "togglePause" ? { targetPaused: !sim.paused } : {}),
           ...(command.type === "setBallCount" ? { targetCount: Math.max(1, Math.floor(command.count)) } : {}),
         };
-        worker.postMessage(command);
-        return;
       }
-      switch (command.type) {
-        case "ping":
-          updateHud();
-          break;
-        case "start":
-          sim.awaitingStart = false;
-          sim.paused = false;
-          updateHud();
-          break;
-        case "togglePause":
-          sim.awaitingStart = false;
-          sim.paused = !sim.paused;
-          updateHud();
-          break;
-        case "reset":
-          Object.assign(sim, createSimulation());
-          fallbackAccumulator = 0;
-          fallbackDamagedShardKeys.clear();
-          awaitingStartRef.current = true;
-          updateHud();
-          saveCurrentGame();
-          break;
-        case "addBall":
-          if (buyBall(sim)) {
-            updateHud();
-            saveCurrentGame();
-          }
-          break;
-        case "setBallCount": {
-          const targetCount = Math.max(1, Math.floor(command.count));
-          while (sim.arrows.length < targetCount) {
-            sim.score = ballCostForCount(sim.arrows.length);
-            if (!buyBall(sim)) break;
-          }
-          if (sim.arrows.length > targetCount) sim.arrows = sim.arrows.slice(0, targetCount);
-          updateHud();
-          break;
-        }
-      }
+      worker.postMessage(command);
     };
     commandHandlerRef.current = commandHandler;
-
-    activateFallback = () => {
-      if (!worker) return;
-      worker.terminate();
-      worker = null;
+    worker.onerror = () => {
       pendingWorkerCommand = null;
-      if (sim.shards.size === 0) {
-        Object.assign(sim, savedGameState ? simulationFromSaveState(savedGameState) : createSimulation());
-      }
-      fallbackAccumulator = 0;
-      fallbackDamagedShardKeys.clear();
-      awaitingStartRef.current = sim.awaitingStart;
-      if (metricsEnabled && Number.isInteger(benchmarkBallCount) && benchmarkBallCount > 1) {
-        commandHandler({ type: "setBallCount", count: benchmarkBallCount });
-      }
-      updateHud();
+      setHud((current) => ({ ...current, paused: true }));
     };
-
-    if (worker) {
-      worker.onerror = activateFallback;
-      worker.onmessage = (message: MessageEvent<SimulationWorkerMessage>) => {
+    worker.onmessage = (message: MessageEvent<SimulationWorkerMessage>) => {
         if (message.data.type === "ready") {
           sim.shards = new Map(message.data.shards.map((shard) => [shard.key, {
             ...shard,
@@ -664,13 +558,10 @@ export default function Home() {
           if (savedGameState) {
             const stateToLoad = savedGameState;
             savedGameState = null;
-            worker?.postMessage({ type: "load", save: stateToLoad });
+            worker.postMessage({ type: "load", save: stateToLoad });
             return;
           }
-          worker?.postMessage({ type: "ping" });
-          if (metricsEnabled && Number.isInteger(benchmarkBallCount) && benchmarkBallCount > 1) {
-            commandHandler({ type: "setBallCount", count: benchmarkBallCount });
-          }
+          worker.postMessage({ type: "ping" });
           viewRadiusRef.current = INITIAL_VIEW_RADIUS;
           emptyCircleRadiusRef.current = 0;
           emptyCircleCenterXRef.current = 0;
@@ -686,43 +577,11 @@ export default function Home() {
         }
         latestWorkerMetrics = message.data.metrics;
       };
-    } else {
-      if (metricsEnabled && Number.isInteger(benchmarkBallCount) && benchmarkBallCount > 1) {
-        commandHandler({ type: "setBallCount", count: benchmarkBallCount });
-      }
-      updateHud();
-    }
     const saveTimer = window.setInterval(saveCurrentGame, SAVE_STATE_INTERVAL_MS);
 
     const tick = (now: number) => {
       const wallDelta = Math.min(0.25, Math.max(0, (now - lastTime) / 1000));
       lastTime = now;
-
-      if (!worker) {
-        fallbackAccumulator += wallDelta;
-        const events: SimulationEvent[] = [];
-        let steps = 0;
-        while (!sim.paused && fallbackAccumulator >= FIXED_TIMESTEP && steps < 8) {
-          const physicsStartedAt = performance.now();
-          const stepEvents = stepSimulation(sim, FIXED_TIMESTEP);
-          fallbackPhysicsMs += performance.now() - physicsStartedAt;
-          fallbackPhysicsSteps += 1;
-          fallbackSimulatedSeconds += FIXED_TIMESTEP;
-          stepEvents.forEach((event) => {
-            events.push(event);
-            if (event.type === "hit") fallbackDamagedShardKeys.add(event.shardKey);
-          });
-          fallbackAccumulator -= FIXED_TIMESTEP;
-          steps += 1;
-        }
-        refreshFallbackDamagedShards();
-        if (events.length > 0) handleEvents(events);
-        if (steps > 0 && performance.now() - hudTime >= 180) {
-          updateHud();
-          hudTime = performance.now();
-        }
-      }
-
       updateCamera(wallDelta);
       updateEmptyCircle(wallDelta);
       draw();
@@ -756,7 +615,7 @@ export default function Home() {
       window.removeEventListener("keydown", startOnInteraction);
       commandHandlerRef.current = () => {};
       window.clearInterval(saveTimer);
-      worker?.terminate();
+      worker.terminate();
       closeAudio(sim);
     };
   }, []);
