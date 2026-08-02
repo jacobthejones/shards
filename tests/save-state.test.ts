@@ -68,6 +68,16 @@ test("a saved simulation includes its version and can be loaded", () => {
   assert.deepEqual(loaded.unlockedTechs, []);
 });
 
+test("a saved simulation preserves purchased technologies", () => {
+  const simulation = makeSimulation();
+  simulation.unlockedTechs = ["resonance", "conduction"];
+
+  const loaded = loadSaveState(serializeSaveState(saveStateForSimulation(simulation)));
+
+  assert.ok(loaded);
+  assert.deepEqual(loaded.unlockedTechs, ["resonance", "conduction"]);
+});
+
 test("every declared save version has a conversion path to the current version", () => {
   const baseSave = saveStateForSimulation(makeSimulation());
 

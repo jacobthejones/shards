@@ -78,6 +78,7 @@ test("keeps the prototype self-contained", async () => {
   assert.match(page, /resonance-icon/);
   assert.doesNotMatch(page, /⌘|◈/);
   assert.match(page, /setTech/);
+  assert.match(page, /if \(techStateChanged\) saveCurrentGame\(\);/);
   assert.doesNotMatch(page, /prism tip|dampener|ball size|BALL_SIZE_COST|buyBallSize/i);
   assert.match(simulation, /buildVoronoiCell/);
   assert.match(simulation, /impactVoronoiCellsFor/);
