@@ -337,6 +337,11 @@ export default function Home() {
     let renderFrames = 0;
     let latestWorkerMetrics: WorkerMetrics | null = null;
     const metricsEnabled = new URLSearchParams(window.location.search).has("metrics");
+    const shardPathCache = new Map<string, Path2D>();
+    const fractureCellCache = new Map<string, [number, number][][]>();
+    let cachedBounds: ReturnType<typeof emptyRegionBounds> | null = null;
+    let cachedBoundsBrokenCount = -1;
+    let cachedBoundsFieldSeed = Number.NaN;
     let pendingWorkerCommand: {
       type: PendingWorkerCommandType;
       targetCount?: number;
@@ -357,7 +362,12 @@ export default function Home() {
       const minimumDimension = Math.min(width, height);
       if (minimumDimension <= 0) return;
 
-      const bounds = emptyRegionBounds(sim);
+      if (!cachedBounds || cachedBoundsBrokenCount !== sim.broken.size || cachedBoundsFieldSeed !== sim.fieldSeed) {
+        cachedBounds = emptyRegionBounds(sim);
+        cachedBoundsBrokenCount = sim.broken.size;
+        cachedBoundsFieldSeed = sim.fieldSeed;
+      }
+      const bounds = cachedBounds;
       const horizontalBoundary = width * (0.5 - VIEWPORT_BORDER_INSET);
       const verticalBoundary = height * (0.5 - VIEWPORT_BORDER_INSET);
       const targetViewRadius = Math.max(
@@ -402,32 +412,50 @@ export default function Home() {
       emptyCircleCenterYRef.current += (targetEmptyCircleCenterY - emptyCircleCenterYRef.current) * smoothing;
     };
 
-    const drawShard = (shard: Shard, scale: number) => {
+    const shardPathFor = (shard: Shard) => {
+      const cacheKey = `${shard.fieldSeed}:${shard.key}`;
+      const cached = shardPathCache.get(cacheKey);
+      if (cached) return cached;
+      const path = new Path2D();
       const points = shardPoints(shard);
+      path.moveTo(points[0][0], points[0][1]);
+      points.slice(1).forEach(([pointX, pointY]) => path.lineTo(pointX, pointY));
+      path.closePath();
+      shardPathCache.set(cacheKey, path);
+      return path;
+    };
+
+    const fractureCellsFor = (shard: Shard, impact: Shard["impacts"][number]) => {
+      const cacheKey = `${shard.fieldSeed}:${shard.key}:${impact.id}:${impact.x}:${impact.y}:${impact.inwardX}:${impact.inwardY}`;
+      const cached = fractureCellCache.get(cacheKey);
+      if (cached) return cached;
+      const cells = impactVoronoiCellsFor(shard, impact);
+      fractureCellCache.set(cacheKey, cells);
+      if (fractureCellCache.size > 4096) {
+        const oldestKey = fractureCellCache.keys().next().value;
+        if (oldestKey !== undefined) fractureCellCache.delete(oldestKey);
+      }
+      return cells;
+    };
+
+    const drawShard = (shard: Shard, scale: number) => {
+      const path = shardPathFor(shard);
       const health = shard.health / shard.maxHealth;
       const damage = 1 - health;
       const lightness = 25 + (1 - health) * 27;
       const saturation = 22 + (1 - health) * 24;
       const alpha = 0.72 + (1 - health) * 0.22;
 
-      context.beginPath();
-      context.moveTo(points[0][0], points[0][1]);
-      points.slice(1).forEach(([pointX, pointY]) => context.lineTo(pointX, pointY));
-      context.closePath();
       context.fillStyle = `hsla(${shard.hue}, ${saturation}%, ${lightness}%, ${alpha})`;
-      context.fill();
+      context.fill(path);
 
       if (shard.impacts.length > 0 && scale > 8) {
         context.save();
-        context.beginPath();
-        context.moveTo(points[0][0], points[0][1]);
-        points.slice(1).forEach(([pointX, pointY]) => context.lineTo(pointX, pointY));
-        context.closePath();
-        context.clip();
+        context.clip(path);
         context.strokeStyle = `hsla(${shard.hue + 34}, 42%, 76%, ${0.045 + damage * 0.11})`;
         context.lineWidth = 0.008;
         shard.impacts.forEach((impact) => {
-          const fractureCells = impactVoronoiCellsFor(shard, impact);
+          const fractureCells = fractureCellsFor(shard, impact);
           const intensity = Math.max(0, Math.min(1, impact.strength / 0.19));
           context.globalAlpha = 0.28 + intensity * 0.72;
           fractureCells.forEach((cell) => {
@@ -444,7 +472,7 @@ export default function Home() {
 
       context.strokeStyle = `hsla(${shard.hue + 18}, 50%, 74%, ${0.08 + (1 - health) * 0.2})`;
       context.lineWidth = 0.012;
-      context.stroke();
+      context.stroke(path);
     };
 
     const drawArrow = (arrow: Arrow) => {
@@ -598,6 +626,7 @@ export default function Home() {
       const previousUnlockedTechs = sim.unlockedTechs.join(",");
       const nextUnlockedTechs = state.unlockedTechs;
       const techStateChanged = previousUnlockedTechs !== nextUnlockedTechs.join(",");
+      const fieldChanged = sim.fieldSeed !== state.fieldSeed;
       sim.time = state.time;
       sim.fieldSeed = state.fieldSeed;
       sim.randomState = state.randomState;
@@ -610,6 +639,11 @@ export default function Home() {
       sim.nextArrowId = state.nextArrowId;
       sim.nextImpactId = state.nextImpactId;
       sim.unlockedTechs = [...nextUnlockedTechs];
+      if (fieldChanged || (state.time === 0 && state.awaitingStart)) {
+        cachedBounds = null;
+        shardPathCache.clear();
+        fractureCellCache.clear();
+      }
       if (techStateChanged) setUnlockedTechs([...nextUnlockedTechs]);
       sim.arrows = state.arrows.map((arrow) => ({ ...arrow }));
       sim.broken = new Set(state.broken);
