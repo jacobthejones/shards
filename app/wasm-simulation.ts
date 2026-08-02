@@ -19,6 +19,9 @@ type WasmExports = {
   set_tech_resonance: (enabled: number) => number;
   set_tech_resonance_state: (enabled: number) => void;
   get_tech_resonance: () => number;
+  set_tech_conduction: (enabled: number) => number;
+  set_tech_conduction_state: (enabled: number) => void;
+  get_tech_conduction: () => number;
   set_score: (score: number) => void;
   set_simulation_meta: (time: number, score: number, hits: number, breaks: number, rate: number) => void;
   set_random_state: (state: number) => void;
@@ -104,6 +107,7 @@ export class WasmSimulation {
   private awaitingStart = true;
   private nextArrowId = 1;
   private resonanceUnlocked = false;
+  private conductionUnlocked = false;
 
   private initializeMeta(ballCount: number) {
     this.arrowMeta = Array.from({ length: ballCount }, (_, index) => ({
@@ -112,6 +116,7 @@ export class WasmSimulation {
     }));
     this.nextArrowId = ballCount;
     this.resonanceUnlocked = false;
+    this.conductionUnlocked = false;
     this.damagedShardIndices.clear();
     this.brokenShardIndices.clear();
   }
@@ -206,7 +211,10 @@ export class WasmSimulation {
       awaitingStart: this.awaitingStart,
       nextArrowId: this.nextArrowId,
       nextImpactId: this.wasm.get_next_impact_id(),
-      unlockedTechs: this.resonanceUnlocked ? [TECH_IDS.RESONANCE] : [],
+      unlockedTechs: [
+        ...(this.resonanceUnlocked ? [TECH_IDS.RESONANCE] : []),
+        ...(this.conductionUnlocked ? [TECH_IDS.CONDUCTION] : []),
+      ],
       arrows: this.readArrows(),
       broken: [...this.brokenShardIndices].map((index) => this.staticShards[index].key),
       shards: this.readDynamicShards(),
@@ -219,7 +227,9 @@ export class WasmSimulation {
     this.wasm.set_score(0);
     this.initializeMeta(1);
     this.wasm.set_tech_resonance_state(0);
+    this.wasm.set_tech_conduction_state(0);
     this.resonanceUnlocked = false;
+    this.conductionUnlocked = false;
     this.paused = true;
     this.awaitingStart = true;
     this.readStaticShards();
@@ -233,7 +243,9 @@ export class WasmSimulation {
     this.wasm.set_random_state(save.randomState);
     this.wasm.set_next_impact_id(save.nextImpactId);
     this.resonanceUnlocked = save.unlockedTechs.includes(TECH_IDS.RESONANCE);
+    this.conductionUnlocked = this.resonanceUnlocked && save.unlockedTechs.includes(TECH_IDS.CONDUCTION);
     this.wasm.set_tech_resonance_state(this.resonanceUnlocked ? 1 : 0);
+    this.wasm.set_tech_conduction_state(this.conductionUnlocked ? 1 : 0);
     this.readStaticShards();
     this.wasm.set_all_shards_broken(0);
     this.brokenShardIndices.clear();
@@ -279,10 +291,17 @@ export class WasmSimulation {
   }
 
   setTech(tech: TechId, enabled: boolean): boolean {
-    if (tech !== TECH_IDS.RESONANCE) return false;
-    const changed = this.wasm.set_tech_resonance(enabled ? 1 : 0) !== 0;
-    if (changed) this.resonanceUnlocked = enabled;
-    return changed;
+    if (tech === TECH_IDS.RESONANCE) {
+      const changed = this.wasm.set_tech_resonance(enabled ? 1 : 0) !== 0;
+      if (changed) this.resonanceUnlocked = enabled;
+      return changed;
+    }
+    if (tech === TECH_IDS.CONDUCTION) {
+      const changed = this.wasm.set_tech_conduction(enabled ? 1 : 0) !== 0;
+      if (changed) this.conductionUnlocked = enabled;
+      return changed;
+    }
+    return false;
   }
 
   step(): SimulationEvent[] {

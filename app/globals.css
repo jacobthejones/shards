@@ -321,7 +321,8 @@ button:focus-visible {
   stroke-width: 1.7;
 }
 
-.resonance-icon {
+.resonance-icon,
+.conduction-icon {
   display: block;
   width: 29px;
   height: 29px;

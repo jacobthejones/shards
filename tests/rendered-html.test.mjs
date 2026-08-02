@@ -115,6 +115,9 @@ test("keeps the prototype self-contained", async () => {
   assert.match(saveState, /SaveStateVersion\.V1/);
   assert.match(saveState, /unlockedTechs/);
   assert.match(techTree, /RESONANCE_COST = 10_000/);
+  assert.match(techTree, /CONDUCTION_COST = 25_000/);
   assert.match(techTree, /Resonance/);
+  assert.match(techTree, /Conduction/);
   assert.match(techTree, /icon: "resonance"/);
+  assert.match(techTree, /icon: "conduction"/);
 });

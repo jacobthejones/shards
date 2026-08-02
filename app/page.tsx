@@ -112,6 +112,12 @@ const ResonanceIcon = () => (
   </svg>
 );
 
+const ConductionIcon = () => (
+  <svg className="conduction-icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+    <path fillRule="evenodd" d="M6.75 3.5L15.25 12L6.75 20.5L1.5 15.25L6.75 10L8.75 12L5.5 15.25L6.75 16.5L11.25 12L6.75 7.5L5.5 8.75L3.5 6.75L6.75 3.5ZM17.25 3.5L22.5 8.75L20.5 10.75L19.25 9.5L14.75 14L19.25 18.5L20.5 17.25L22.5 19.25L17.25 20.5L8.75 12L17.25 3.5Z" />
+  </svg>
+);
+
 const createRenderSimulation = (): Simulation => ({
   shards: new Map(),
   broken: new Set(),
@@ -741,6 +747,7 @@ export default function Home() {
                     aria-label={`${tech.title}${unlocked ? " unlocked" : " technology"}`}
                   >
                     {tech.icon === "resonance" && <ResonanceIcon />}
+                    {tech.icon === "conduction" && <ConductionIcon />}
                   </button>
                 );
               })}

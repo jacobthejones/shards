@@ -1,12 +1,14 @@
 export const TECH_IDS = {
   RESONANCE: "resonance",
+  CONDUCTION: "conduction",
 } as const;
 
 export type TechId = typeof TECH_IDS[keyof typeof TECH_IDS];
 
 export const RESONANCE_COST = 10_000;
+export const CONDUCTION_COST = 25_000;
 
-export type TechIcon = "resonance";
+export type TechIcon = "resonance" | "conduction";
 
 export type TechDefinition = {
   id: TechId;
@@ -25,6 +27,14 @@ export const TECH_TREE: TechDefinition[] = [
     icon: "resonance",
     cost: RESONANCE_COST,
     dependsOn: [],
+  },
+  {
+    id: TECH_IDS.CONDUCTION,
+    title: "Conduction",
+    description: "The resonance travels one layer farther, reaching second-neighbor shards with a softer echo.",
+    icon: "conduction",
+    cost: CONDUCTION_COST,
+    dependsOn: [TECH_IDS.RESONANCE],
   },
 ];
 
