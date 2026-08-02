@@ -291,6 +291,7 @@ button:focus-visible {
   color: var(--teal-bright);
   font-size: 21px;
   line-height: 1;
+  opacity: 0.42;
 }
 
 .upgrade-card > span:last-child {
@@ -417,17 +418,6 @@ button:focus-visible {
   border-color: var(--teal);
   background: rgba(20, 65, 66, 0.7);
 }
-
-.support-fallback {
-  display: inline-block;
-  margin-top: 15px;
-  color: var(--muted-soft);
-  font-size: 9px;
-  text-decoration: underline;
-  text-underline-offset: 3px;
-}
-
-.support-fallback:hover { color: var(--teal-bright); }
 
 @media (max-width: 760px) {
   .game-topbar { padding: 19px 17px; }

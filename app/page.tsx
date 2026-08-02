@@ -776,9 +776,8 @@ export default function Home() {
             <h2 id="support-title">Send 25¢ to support the project</h2>
             <div className="support-links">
               <a href="https://paypal.me/jacobthejones/0.25USD" target="_blank" rel="noopener noreferrer">PayPal · 25¢</a>
-              <a href="venmo://paycharge?txn=pay&recipients=jacobthejones&amount=0.25&note=shards%20game" target="_blank" rel="noopener noreferrer">Venmo · 25¢</a>
+              <a href="https://venmo.com/u/jacobthejones" target="_blank" rel="noopener noreferrer">Venmo · 25¢</a>
             </div>
-            <a className="support-fallback" href="https://venmo.com/u/jacobthejones" target="_blank" rel="noopener noreferrer">Open Venmo profile</a>
           </section>
         </div>
       )}

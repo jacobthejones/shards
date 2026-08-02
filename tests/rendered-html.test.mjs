@@ -64,7 +64,7 @@ test("keeps the prototype self-contained", async () => {
   assert.match(page, /Support the project/);
   assert.match(page, /Send 25¢ to support the project/);
   assert.match(page, /paypal\.me\/jacobthejones\/0\.25USD/);
-  assert.match(page, /venmo:\/\/paycharge/);
+  assert.match(page, /https:\/\/venmo\.com\/u\/jacobthejones/);
   assert.doesNotMatch(page, /Math\.pow\(1\.2/);
   assert.match(page, /awaitingStart/);
   assert.doesNotMatch(page, /setInterval|130\.81|174\.61/);
