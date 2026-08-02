@@ -39,10 +39,11 @@ test("server-renders the shards experience", async () => {
 });
 
 test("keeps the prototype self-contained", async () => {
-  const [page, simulation, worker, layout, css, packageJson, saveState, techTree] = await Promise.all([
+  const [page, simulation, worker, wasmSimulation, layout, css, packageJson, saveState, techTree] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/simulation.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/simulation.worker.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/wasm-simulation.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
     readFile(new URL("../package.json", import.meta.url), "utf8"),
@@ -105,6 +106,7 @@ test("keeps the prototype self-contained", async () => {
   assert.match(worker, /case "ping"/);
   assert.match(worker, /case "load"/);
   assert.match(worker, /case "setTech"/);
+  assert.match(wasmSimulation, /simulation\.wasm\?v=\$\{WASM_RUNTIME_VERSION\}/);
   assert.match(packageJson, /build:wasm/);
   assert.match(saveState, /SaveStateVersion\.V2/);
   assert.match(saveState, /SaveStateVersion\.V1/);

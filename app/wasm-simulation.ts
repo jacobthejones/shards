@@ -10,6 +10,8 @@ import {
 import type { SaveState } from "./save-state";
 import { TECH_IDS, type TechId } from "./tech-tree";
 
+const WASM_RUNTIME_VERSION = 2;
+
 type WasmExports = {
   initialize_real_simulation: (seed: number, fieldSeed: number, balls: number) => void;
   step_real_simulation: (steps: number) => void;
@@ -72,7 +74,8 @@ export class WasmSimulation {
   private constructor(private readonly wasm: WasmExports) {}
 
   private static async loadModule(): Promise<WasmExports> {
-    const response = await fetch(new URL("/simulation.wasm", self.location.origin));
+    const wasmUrl = new URL(`/simulation.wasm?v=${WASM_RUNTIME_VERSION}`, self.location.origin);
+    const response = await fetch(wasmUrl);
     if (!response.ok) throw new Error(`Unable to load simulation.wasm (${response.status})`);
     const bytes = await response.arrayBuffer();
     const { instance } = await WebAssembly.instantiate(bytes, {
