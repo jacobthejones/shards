@@ -74,6 +74,9 @@ test("keeps the prototype self-contained", async () => {
   assert.match(simulation, /emptyRegionEnclosingCircle/);
   assert.match(simulation, /type: "collision"/);
   assert.match(simulation, /const STARTING_LUMENS = 0/);
+  assert.match(simulation, /const SHARD_MAX_HEALTH = 1/);
+  assert.match(simulation, /const BASE_HIT_DAMAGE = 0\.2/);
+  assert.match(simulation, /const SHARD_REGENERATION_RATE = 0\.01/);
   assert.match(simulation, /sim\.score \+= 1/);
   assert.match(simulation, /sim\.score \+= 100/);
   assert.match(simulation, /recentBreakRate/);

@@ -83,7 +83,9 @@ export const STARTING_LUMENS = 0;
 export const TAU = Math.PI * 2;
 export const BASE_BALL_RADIUS = 0.095;
 export const INITIAL_BALL_SPEED = Math.hypot(1.2, 0.79);
-export const BASE_HIT_DAMAGE = 0.19;
+export const SHARD_MAX_HEALTH = 1;
+export const BASE_HIT_DAMAGE = 0.2;
+export const SHARD_REGENERATION_RATE = 0.01;
 export const INITIAL_BALL_COST = 300;
 export const BALL_COST_GROWTH = 1.2;
 export const BOUNCE_JITTER_RADIANS = (0.02 * Math.PI) / 180;
@@ -213,9 +215,7 @@ export const refreshShardHealth = (sim: Simulation, shard: Shard) => {
   if (sim.broken.has(shard.key)) return;
   const elapsed = Math.max(0, sim.time - shard.healthUpdatedAt);
   if (elapsed <= 0) return;
-  const distance = Math.hypot(shard.gx, shard.gy);
-  const regeneration = 0.013 * (1 + Math.max(0, distance - 5) * 0.045);
-  let healing = Math.min(shard.maxHealth - shard.health, regeneration * elapsed);
+  let healing = Math.min(shard.maxHealth - shard.health, SHARD_REGENERATION_RATE * elapsed);
   shard.health = Math.min(shard.maxHealth, shard.health + healing);
   for (const impact of shard.impacts) {
     if (healing <= 0) break;
@@ -604,7 +604,7 @@ const collisionFor = (sim: Simulation, x: number, y: number, nextX: number, next
 const createShard = (gx: number, gy: number, fieldSeed: number): Shard => {
   const distance = Math.hypot(gx, gy);
   const seed = seededHash(gx + 4.8, gy - 2.3, fieldSeed);
-  const maxHealth = 0.76 + Math.min(2.1, distance * 0.075) + seed * 0.44;
+  const maxHealth = SHARD_MAX_HEALTH;
   const { sx, sy, points } = buildVoronoiCell(gx, gy, fieldSeed);
   return {
     key: keyFor(gx, gy), gx, gy, sx, sy, points, health: maxHealth, maxHealth, healthUpdatedAt: 0,
