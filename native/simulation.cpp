@@ -20,6 +20,8 @@
 #define SHARD_MAX_HEALTH 1.0
 #define BASE_HIT_DAMAGE 0.2
 #define SHARD_REGENERATION_RATE 0.01
+#define SHARD_GROWTH_INITIAL 0.10
+#define SHARD_GROWTH_RATE 0.02
 #define HEALTH_EPSILON 0.000000001
 #define INITIAL_BALL_COST 300.0
 #define BALL_COST_GROWTH 1.2
@@ -378,7 +380,7 @@ static void add_impact(int32_t shard, double x, double y, double inward_x, doubl
 
 static void begin_shard_growth(int32_t shard) {
   if (!SHARD_BROKEN[shard] || SHARD_GROWING[shard]) return;
-  SHARD_GROWTH[shard] = 0.0;
+  SHARD_GROWTH[shard] = SHARD_GROWTH_INITIAL;
   SHARD_GROWING[shard] = 1;
   mark_shard_damaged(shard);
   record_event(5, shard, shard);
@@ -394,7 +396,7 @@ static void reset_shard_growth(int32_t shard) {
 
 static void refresh_shard_growth(int32_t shard) {
   if (!SHARD_GROWING[shard]) return;
-  SHARD_GROWTH[shard] += SHARD_REGENERATION_RATE * FIXED_TIMESTEP;
+  SHARD_GROWTH[shard] += SHARD_GROWTH_RATE * FIXED_TIMESTEP;
   if (SHARD_GROWTH[shard] < 1.0) return;
   SHARD_GROWTH[shard] = 0.0;
   SHARD_GROWING[shard] = 0;

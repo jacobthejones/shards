@@ -125,12 +125,13 @@ test("New Growth starts only when the chosen ball sweeps through an empty cell",
   assert.ok(growthEvents > 0);
   assert.equal(wasm.is_shard_broken(centerShard), 1);
   assert.equal(wasm.get_shard_growing(centerShard), 1);
-  assert.ok(wasm.get_shard_growth(centerShard) > 0);
+  assert.ok(wasm.get_shard_growth(centerShard) > 0.1);
+  assert.ok(wasm.get_shard_growth(centerShard) < 0.101);
 
   wasm.set_ball_state(0, 100, 100, 0, 0, 0);
   wasm.step_real_simulation(60);
-  assert.ok(wasm.get_shard_growth(centerShard) > 0.009);
-  assert.ok(wasm.get_shard_growth(centerShard) < 0.012);
+  assert.ok(wasm.get_shard_growth(centerShard) > 0.119);
+  assert.ok(wasm.get_shard_growth(centerShard) < 0.122);
 
   wasm.step_real_simulation(6_000);
   assert.equal(wasm.is_shard_broken(centerShard), 0);
