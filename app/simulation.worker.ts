@@ -8,6 +8,8 @@ let metricWindowStartedAt = lastWallTime;
 let metricPhysicsMs = 0;
 let metricPhysicsSteps = 0;
 let metricSimulatedSeconds = 0;
+let metricStateSyncMs = 0;
+let metricStateMessages = 0;
 
 const post = (message: SimulationWorkerMessage) => self.postMessage(message);
 
@@ -18,7 +20,11 @@ const postReady = () => {
 
 const postState = (events: SimulationEvent[]) => {
   if (!simulation) return;
-  post({ type: "state", events, state: simulation.getState() });
+  const startedAt = performance.now();
+  const state = simulation.getState();
+  post({ type: "state", events, state });
+  metricStateSyncMs += performance.now() - startedAt;
+  metricStateMessages += 1;
 };
 
 const postMetricsIfReady = (now: number) => {
@@ -31,19 +37,23 @@ const postMetricsIfReady = (now: number) => {
       physicsMs: metricPhysicsMs,
       physicsSteps: metricPhysicsSteps,
       simulatedSeconds: metricSimulatedSeconds,
+      stateSyncMs: metricStateSyncMs,
+      stateMessages: metricStateMessages,
     },
   });
   metricWindowStartedAt = now;
   metricPhysicsMs = 0;
   metricPhysicsSteps = 0;
   metricSimulatedSeconds = 0;
+  metricStateSyncMs = 0;
+  metricStateMessages = 0;
 };
 
 const tick = () => {
   const now = performance.now();
   const wallDelta = Math.min(0.25, Math.max(0, (now - lastWallTime) / 1000));
   lastWallTime = now;
-  if (simulation && !simulation.getState().paused) {
+  if (simulation && !simulation.isPaused) {
     accumulator += wallDelta;
     const events: SimulationEvent[] = [];
     let steps = 0;
@@ -59,7 +69,10 @@ const tick = () => {
     if (steps > 0) postState(events);
   }
   postMetricsIfReady(now);
-  setTimeout(tick, 0);
+  const delayMs = simulation?.isPaused
+    ? 50
+    : Math.max(1, (FIXED_TIMESTEP - accumulator) * 1000);
+  setTimeout(tick, delayMs);
 };
 
 self.onmessage = (event: MessageEvent<SimulationWorkerCommand>) => {

@@ -108,6 +108,8 @@ export type WorkerMetrics = {
   physicsMs: number;
   physicsSteps: number;
   simulatedSeconds: number;
+  stateSyncMs: number;
+  stateMessages: number;
 };
 
 export type SimulationWorkerCommand =

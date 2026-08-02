@@ -2,6 +2,16 @@ export const RENDER_CHUNK_SIZE = 8;
 export const RENDER_CHUNK_PADDING = 1.25;
 export const MAX_RENDER_CHUNKS = 96;
 
+export const nextChunkRasterScale = (currentScale: number, requiredScale: number) => {
+  const required = Math.max(1, requiredScale);
+  if (currentScale <= 0 || required > currentScale) return required;
+  // Raster surfaces are allowed a little headroom while the camera smoothly
+  // zooms out. Once they have over twice the needed pixel area, rebuild them
+  // at the current density instead of retaining the initial close-up buffers.
+  if (required < currentScale * 0.7) return required * 1.1;
+  return currentScale;
+};
+
 export type RenderChunkCoordinate = {
   x: number;
   y: number;
@@ -109,7 +119,7 @@ export class RenderChunkCache<T> {
   private entries = new Map<string, RenderChunkEntry<T>>();
   private usageCounter = 0;
 
-  constructor(private readonly maxEntries = MAX_RENDER_CHUNKS) {}
+  constructor(private maxEntries = MAX_RENDER_CHUNKS) {}
 
   getOrCreate(
     key: string,
@@ -141,6 +151,11 @@ export class RenderChunkCache<T> {
   clear() {
     this.entries.clear();
     this.usageCounter = 0;
+  }
+
+  setMaxEntries(maxEntries: number) {
+    this.maxEntries = Math.max(1, Math.floor(maxEntries));
+    this.evictIfNeeded();
   }
 
   get size() {

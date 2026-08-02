@@ -47,10 +47,11 @@ import {
   RENDER_CHUNK_PADDING,
   RENDER_CHUNK_SIZE,
   RenderChunkCache,
+  nextChunkRasterScale,
+  renderChunkCoordinateForCell,
   renderChunkKey,
   renderChunkOriginForCoordinate,
   renderChunkRangeForCellBounds,
-  renderChunkSignature,
 } from "./render-cache";
 
 type InteractiveWorkerCommand = Exclude<SimulationWorkerCommand, { type: "load" }>;
@@ -388,6 +389,8 @@ export default function Home() {
     let metricsWindowStartedAt = lastTime;
     let renderMs = 0;
     let renderFrames = 0;
+    let stateApplyMs = 0;
+    let stateMessages = 0;
     let latestWorkerMetrics: WorkerMetrics | null = null;
     const metricsEnabled = new URLSearchParams(window.location.search).has("metrics");
     const shardPathCache = new Map<string, Path2D>();
@@ -400,6 +403,7 @@ export default function Home() {
     };
     const chunkCache = new RenderChunkCache<RenderChunkSurface>(MAX_RENDER_CHUNKS);
     let chunkRasterScale = 0;
+    let dynamicShardKeys = new Set<string>();
     let cachedBounds: ReturnType<typeof emptyRegionBounds> | null = null;
     let cachedBoundsBrokenCount = -1;
     let cachedBoundsFieldSeed = Number.NaN;
@@ -501,6 +505,12 @@ export default function Home() {
       return cells;
     };
 
+    const invalidateShardChunk = (shardKey: string) => {
+      const shard = sim.shards.get(shardKey);
+      if (!shard) return;
+      chunkCache.invalidate(renderChunkKey(renderChunkCoordinateForCell(shard.gx, shard.gy)));
+    };
+
     const drawShard = (targetContext: ChunkContext, shard: Shard, scale: number) => {
       const path = shardPathFor(shard);
       const health = shard.health / shard.maxHealth;
@@ -567,17 +577,9 @@ export default function Home() {
           if (shard) shards.push(shard);
         }
       }
+      if (shards.length === 0) return null;
       const fracturesVisible = scale > 8;
-      const signature = renderChunkSignature(sim.fieldSeed, fracturesVisible, shards.map((shard) => ({
-        key: shard.key,
-        broken: sim.broken.has(shard.key),
-        health: shard.health,
-        maxHealth: shard.maxHealth,
-        growth: shard.growth,
-        growing: shard.growing,
-        hue: shard.hue,
-        impacts: shard.impacts,
-      })));
+      const signature = `${sim.fieldSeed}:${fracturesVisible ? 1 : 0}`;
       const surface = chunkCache.getOrCreate(
         key,
         signature,
@@ -614,8 +616,9 @@ export default function Home() {
 
     const ensureChunkRasterScale = (scale: number) => {
       const requiredScale = Math.max(1, scale * dpr);
-      if (requiredScale <= chunkRasterScale) return;
-      chunkRasterScale = requiredScale;
+      const nextScale = nextChunkRasterScale(chunkRasterScale, requiredScale);
+      if (nextScale === chunkRasterScale) return;
+      chunkRasterScale = nextScale;
       chunkCache.clear();
     };
 
@@ -674,9 +677,13 @@ export default function Home() {
       const minCellX = Math.floor(-visibleWorldHalfWidth);
       const maxCellX = Math.ceil(visibleWorldHalfWidth);
       const visibleChunks = renderChunkRangeForCellBounds(minCellX, maxCellX, minCellY, maxCellY);
+      const visibleChunkCount = (visibleChunks.maxX - visibleChunks.minX + 1)
+        * (visibleChunks.maxY - visibleChunks.minY + 1);
+      chunkCache.setMaxEntries(visibleChunkCount);
       for (let chunkY = visibleChunks.minY; chunkY <= visibleChunks.maxY; chunkY += 1) {
         for (let chunkX = visibleChunks.minX; chunkX <= visibleChunks.maxX; chunkX += 1) {
           const chunk = drawChunk(chunkX, chunkY, scale);
+          if (!chunk) continue;
           context.drawImage(
             chunk.surface.canvas,
             chunk.origin.x - RENDER_CHUNK_PADDING,
@@ -708,8 +715,14 @@ export default function Home() {
           physicsMs: physicsMetrics?.physicsMs ?? 0,
           physicsSteps: physicsMetrics?.physicsSteps ?? 0,
           simulatedSeconds: physicsMetrics?.simulatedSeconds ?? 0,
+          stateSyncMs: physicsMetrics?.stateSyncMs ?? 0,
+          workerStateMessages: physicsMetrics?.stateMessages ?? 0,
+          stateApplyMs,
+          stateMessages,
           renderMs,
           renderFrames,
+          renderChunkCount: chunkCache.size,
+          chunkRasterScale,
           simulationRate: physicsMetrics ? physicsMetrics.simulatedSeconds / (physicsMetrics.windowMs / 1000) : 0,
         };
         (window as Window & { __SHARDS_METRICS__?: typeof metrics }).__SHARDS_METRICS__ = metrics;
@@ -717,6 +730,8 @@ export default function Home() {
         metricsWindowStartedAt = now;
         renderMs = 0;
         renderFrames = 0;
+        stateApplyMs = 0;
+        stateMessages = 0;
       }
     };
 
@@ -800,18 +815,29 @@ export default function Home() {
         shardPathCache.clear();
         fractureCellCache.clear();
         chunkCache.clear();
+        dynamicShardKeys.clear();
       }
       if (techStateChanged) setUnlockedTechs([...nextUnlockedTechs]);
       sim.arrows = state.arrows.map((arrow) => ({ ...arrow }));
-      sim.broken = new Set(state.broken);
-      const dynamicShardKeys = new Set(state.shards.map((dynamicShard) => dynamicShard.key));
-      sim.shards.forEach((shard) => {
-        if (sim.broken.has(shard.key) || dynamicShardKeys.has(shard.key)) return;
+      const nextBroken = new Set(state.broken);
+      sim.broken.forEach((key) => {
+        if (!nextBroken.has(key)) invalidateShardChunk(key);
+      });
+      nextBroken.forEach((key) => {
+        if (!sim.broken.has(key)) invalidateShardChunk(key);
+      });
+      sim.broken = nextBroken;
+      const nextDynamicShardKeys = new Set(state.shards.map((dynamicShard) => dynamicShard.key));
+      dynamicShardKeys.forEach((key) => {
+        if (nextDynamicShardKeys.has(key) || sim.broken.has(key)) return;
+        const shard = sim.shards.get(key);
+        if (!shard) return;
         shard.health = shard.maxHealth;
         shard.healthUpdatedAt = sim.time;
         shard.growth = 0;
         shard.growing = false;
         shard.impacts = [];
+        invalidateShardChunk(key);
       });
       state.shards.forEach((dynamicShard) => {
         const shard = sim.shards.get(dynamicShard.key);
@@ -822,7 +848,9 @@ export default function Home() {
         shard.growth = dynamicShard.growth;
         shard.growing = dynamicShard.growing;
         shard.impacts = dynamicShard.impacts.map((impact) => ({ ...impact }));
+        invalidateShardChunk(dynamicShard.key);
       });
+      dynamicShardKeys = nextDynamicShardKeys;
       if (events.length > 0) handleEvents(events);
       if (previousArrowCount > 0 && state.arrows.length > previousArrowCount) saveCurrentGame();
       if (techStateChanged) saveCurrentGame();
@@ -891,9 +919,12 @@ export default function Home() {
           return;
         }
         if (message.data.type === "state") {
+          const applyStartedAt = performance.now();
           awaitingStartRef.current = message.data.state.awaitingStart;
           applyWorkerState(message.data.state, message.data.events);
           acknowledgeWorkerState(message.data.state);
+          stateApplyMs += performance.now() - applyStartedAt;
+          stateMessages += 1;
           return;
         }
         latestWorkerMetrics = message.data.metrics;

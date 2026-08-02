@@ -405,5 +405,6 @@ export class WasmSimulation {
 
   getStaticShards() { return this.staticShards; }
   getState() { return this.state(); }
+  get isPaused() { return this.paused; }
   get ballRadius() { return BASE_BALL_RADIUS; }
 }

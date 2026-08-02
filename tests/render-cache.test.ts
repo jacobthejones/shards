@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   RENDER_CHUNK_SIZE,
   RenderChunkCache,
+  nextChunkRasterScale,
   renderChunkCoordinateForCell,
   renderChunkKey,
   renderChunkOriginForCoordinate,
@@ -113,6 +114,30 @@ test("cache evicts least recently used chunks while retaining the newest work", 
   assert.equal(cache.has("old"), true);
   assert.equal(cache.has("new"), true);
   assert.equal(cache.has("middle"), false);
+});
+
+test("cache capacity can expand to the complete visible working set", () => {
+  const cache = new RenderChunkCache<{ key: string }>(96);
+  let rasterizations = 0;
+  const renderFrame = () => {
+    cache.setMaxEntries(120);
+    for (let index = 0; index < 120; index += 1) {
+      const key = String(index);
+      cache.getOrCreate(key, "stable", () => ({ key }), () => { rasterizations += 1; });
+    }
+  };
+
+  renderFrame();
+  assert.equal(rasterizations, 120);
+  renderFrame();
+  assert.equal(rasterizations, 120, "a visible set larger than the old cap must not rerasterize every frame");
+});
+
+test("raster scale sheds excess close-up resolution as the camera zooms out", () => {
+  assert.equal(nextChunkRasterScale(0, 20), 20);
+  assert.equal(nextChunkRasterScale(20, 15), 20, "small zoom changes reuse the existing pixels");
+  assert.equal(nextChunkRasterScale(20, 10), 11, "buffers rebuild after their pixel area becomes excessive");
+  assert.equal(nextChunkRasterScale(10, 12), 12, "zooming in restores the required resolution");
 });
 
 test("clearing the cache removes all raster surfaces and signatures", () => {
