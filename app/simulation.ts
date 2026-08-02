@@ -86,6 +86,7 @@ export const INITIAL_BALL_SPEED = Math.hypot(1.2, 0.79);
 export const SHARD_MAX_HEALTH = 1;
 export const BASE_HIT_DAMAGE = 0.2;
 export const SHARD_REGENERATION_RATE = 0.01;
+const HEALTH_EPSILON = 0.000000001;
 export const INITIAL_BALL_COST = 300;
 export const BALL_COST_GROWTH = 1.2;
 export const BOUNCE_JITTER_RADIANS = (0.02 * Math.PI) / 180;
@@ -666,7 +667,8 @@ const hitShard = (
 ) => {
   if (arrow.hitCooldown > 0) return;
   refreshShardHealth(sim, target);
-  target.health -= BASE_HIT_DAMAGE;
+  const remainingHealth = target.health - BASE_HIT_DAMAGE;
+  target.health = remainingHealth <= HEALTH_EPSILON ? 0 : remainingHealth;
   target.impacts.push({
     id: sim.nextImpactId++,
     x: point[0],
