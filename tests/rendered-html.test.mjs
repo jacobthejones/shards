@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { access, readFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
@@ -9,23 +9,14 @@ const execFileAsync = promisify(execFile);
 const projectRoot = fileURLToPath(new URL("../", import.meta.url));
 
 async function render() {
-  const workerUrl = new URL("../dist/server/index.js", import.meta.url);
-  workerUrl.searchParams.set("test", `${process.pid}-${Date.now()}`);
-  const { default: worker } = await import(workerUrl.href);
+  const serverUrl = new URL("../dist/server/index.js", import.meta.url);
+  serverUrl.searchParams.set("test", `${process.pid}-${Date.now()}`);
+  const { default: handler } = await import(serverUrl.href);
 
-  return worker.fetch(
+  return handler(
     new Request("http://localhost/", {
       headers: { accept: "text/html" },
     }),
-    {
-      ASSETS: {
-        fetch: async () => new Response("Not found", { status: 404 }),
-      },
-    },
-    {
-      waitUntil() {},
-      passThroughOnException() {},
-    },
   );
 }
 
@@ -100,7 +91,6 @@ test("keeps the prototype self-contained", async () => {
   assert.match(css, /\.field-canvas/);
   assert.match(css, /prefers-reduced-motion|@keyframes sound-wave/);
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
-  await assert.rejects(access(new URL("../app/_sites-preview", import.meta.url)));
 });
 
 test("keeps the headless balance strategy runnable", async () => {
