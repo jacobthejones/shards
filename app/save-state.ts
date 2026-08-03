@@ -3,15 +3,16 @@ import {
   type DynamicShardState,
   type Simulation,
 } from "./simulation";
-import { LEGACY_TECH_IDS, TECH_IDS } from "./tech-tree";
+import { REMOVED_TECH_REFUNDS, TECH_IDS, type TechId } from "./tech-tree";
 
 export enum SaveStateVersion {
   V1 = 1,
   V2 = 2,
   V3 = 3,
+  V4 = 4,
 }
 
-export const CURRENT_SAVE_STATE_VERSION = SaveStateVersion.V3;
+export const CURRENT_SAVE_STATE_VERSION = SaveStateVersion.V4;
 export const SAVE_STATE_STORAGE_KEY = "shards.game.save";
 export const SAVE_STATE_INTERVAL_MS = 15_000;
 
@@ -44,7 +45,11 @@ export type SaveStateV3 = Omit<SaveStateV2, "version" | "shards"> & {
   shards: DynamicShardState[];
 };
 
-export type SaveState = SaveStateV3;
+export type SaveStateV4 = Omit<SaveStateV3, "version"> & {
+  version: SaveStateVersion.V4;
+};
+
+export type SaveState = SaveStateV4;
 export type SaveStateMigration = (value: unknown) => SaveState;
 
 export const SAVE_STATE_VERSIONS = Object.values(SaveStateVersion).filter(
@@ -82,15 +87,18 @@ const arrowValue = (value: unknown): Arrow => {
     vy: finiteNumber(value.vy, "arrow.vy"),
     hue: finiteNumber(value.hue, "arrow.hue"),
     hitCooldown: finiteNumber(value.hitCooldown, "arrow.hitCooldown"),
-    corrosiveWakeCharged: value.corrosiveWakeCharged === undefined
-      ? false
-      : booleanValue(value.corrosiveWakeCharged, "arrow.corrosiveWakeCharged"),
   };
 };
 
-const normalizeTechId = (tech: string) => tech === LEGACY_TECH_IDS.NEW_GROWTH
-  ? TECH_IDS.CORROSIVE_WAKE
-  : tech;
+const migrateTechState = (value: unknown) => {
+  if (!Array.isArray(value)) throw new Error("Invalid save tech state");
+  const purchasedTechs = value.map((tech) => stringValue(tech, "unlocked tech"));
+  const uniquePurchasedTechs = [...new Set(purchasedTechs)];
+  const refund = uniquePurchasedTechs.reduce((total, tech) => total + (REMOVED_TECH_REFUNDS[tech] ?? 0), 0);
+  const activeTechIds = new Set<string>(Object.values(TECH_IDS));
+  const unlockedTechs = uniquePurchasedTechs.filter((tech): tech is TechId => activeTechIds.has(tech));
+  return { refund, unlockedTechs };
+};
 
 const impactValue = (value: unknown) => {
   if (!isRecord(value)) throw new Error("Invalid save impact");
@@ -125,7 +133,7 @@ const migrateV1 = (value: unknown): SaveState => {
   }
 
   return {
-    version: SaveStateVersion.V3,
+    version: SaveStateVersion.V4,
     savedAt: finiteNumber(value.savedAt, "savedAt"),
     fieldSeed: finiteNumber(value.fieldSeed, "fieldSeed"),
     randomState: finiteNumber(value.randomState, "randomState"),
@@ -147,31 +155,38 @@ const migrateV1 = (value: unknown): SaveState => {
 
 const migrateV2 = (value: unknown): SaveState => {
   const migrated = migrateV1(value);
-  if (!isRecord(value) || !Array.isArray(value.unlockedTechs)) throw new Error("Invalid save tech state");
+  if (!isRecord(value)) throw new Error("Invalid save tech state");
+  const techState = migrateTechState(value.unlockedTechs);
   return {
     ...migrated,
-    version: SaveStateVersion.V3,
-    unlockedTechs: value.unlockedTechs.map((tech) => normalizeTechId(stringValue(tech, "unlocked tech"))),
+    version: SaveStateVersion.V4,
+    score: migrated.score + techState.refund,
+    unlockedTechs: techState.unlockedTechs,
   };
 };
 
 const migrateV3 = (value: unknown): SaveState => {
-  if (!isRecord(value) || !Array.isArray(value.shards) || !Array.isArray(value.unlockedTechs)) {
+  if (!isRecord(value) || !Array.isArray(value.shards)) {
     throw new Error("Invalid save state growth fields");
   }
   const migrated = migrateV1(value);
+  const techState = migrateTechState(value.unlockedTechs);
   return {
     ...migrated,
-    version: SaveStateVersion.V3,
-    unlockedTechs: value.unlockedTechs.map((tech) => normalizeTechId(stringValue(tech, "unlocked tech"))),
+    version: SaveStateVersion.V4,
+    score: migrated.score + techState.refund,
+    unlockedTechs: techState.unlockedTechs,
     shards: value.shards.map((shard) => dynamicShardValue(shard, true)),
   };
 };
+
+const migrateV4 = (value: unknown): SaveState => migrateV3(value);
 
 export const SAVE_STATE_MIGRATIONS: Record<SaveStateVersion, SaveStateMigration> = {
   [SaveStateVersion.V1]: migrateV1,
   [SaveStateVersion.V2]: migrateV2,
   [SaveStateVersion.V3]: migrateV3,
+  [SaveStateVersion.V4]: migrateV4,
 };
 
 const isSaveStateVersion = (value: unknown): value is SaveStateVersion => {

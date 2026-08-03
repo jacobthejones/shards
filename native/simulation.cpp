@@ -1393,8 +1393,8 @@ static Collision collision_for(double x, double y, double next_x, double next_y,
 }
 
 // RETAINED LEGACY NEW GROWTH IMPLEMENTATION: this path is intentionally
-// inactive while the branch is repurposed as Corrosive Wake. Keep it nearby so
-// the empty-cell growth behavior can be reused in a later tech.
+// inactive while the old branch is removed. Keep it nearby so the empty-cell
+// growth behavior can be reused in a later tech.
 static void process_growth_path(int32_t ball, double x, double y, double next_x, double next_y) {
   if (!new_growth_unlocked && damaged_shard_count == 0) return;
   int32_t min_x = (int32_t)floor(x < next_x ? x : next_x) - 1;

@@ -19,14 +19,6 @@ export type Shard = {
 
 export type ShardBoundaryEdge = [[number, number], [number, number]];
 
-export type CorrosiveWakeSegment = {
-  startX: number;
-  startY: number;
-  endX: number;
-  endY: number;
-  age: number;
-};
-
 export type ShardImpact = {
   id: number;
   x: number;
@@ -42,7 +34,6 @@ export type Simulation = {
   broken: Set<string>;
   fieldSeed: number;
   arrows: Arrow[];
-  corrosiveWake: CorrosiveWakeSegment[];
   nextArrowId: number;
   nextImpactId: number;
   unlockedTechs: string[];
@@ -74,7 +65,6 @@ export type Arrow = {
   vy: number;
   hue: number;
   hitCooldown: number;
-  corrosiveWakeCharged: boolean;
 };
 
 export type SimulationHud = {
@@ -112,7 +102,6 @@ export type WorkerSimulationState = {
   nextImpactId: number;
   unlockedTechs: string[];
   arrows: Arrow[];
-  corrosiveWake: CorrosiveWakeSegment[];
   broken: string[];
   shards: DynamicShardState[];
 };
@@ -132,7 +121,7 @@ export type SimulationWorkerCommand =
   | { type: "togglePause" }
   | { type: "reset" }
   | { type: "addBall" }
-  | { type: "setTech"; tech: "chosen-one" | "corrosive-wake" | "resonance" | "conduction"; enabled: boolean }
+  | { type: "setTech"; tech: "resonance" | "conduction"; enabled: boolean }
   | { type: "setBallCount"; count: number }
   | { type: "load"; save: import("./save-state").SaveState };
 
@@ -152,7 +141,6 @@ export const SHARD_REGENERATION_RATE = 0.01;
 export const INITIAL_BALL_COST = 300;
 export const BALL_COST_GROWTH = 1.2;
 export const BOUNCE_JITTER_RADIANS = (0.02 * Math.PI) / 180;
-export const CORROSIVE_WAKE_DURATION_SECONDS = 6;
 export const FIXED_TIMESTEP = 1 / 60;
 export const INITIAL_VIEW_RADIUS = 7.8;
 export const RECENT_BREAK_RATE_TIME_CONSTANT_SECONDS = 60;

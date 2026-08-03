@@ -36,8 +36,7 @@ const makeSimulation = (): Simulation => ({
   ]]),
   broken: new Set(),
   fieldSeed: 1234,
-  arrows: [{ id: 0, x: 1.2, y: -0.4, vx: 0.3, vy: -0.7, hue: 188, hitCooldown: 0.02, corrosiveWakeCharged: true }],
-  corrosiveWake: [],
+  arrows: [{ id: 0, x: 1.2, y: -0.4, vx: 0.3, vy: -0.7, hue: 188, hitCooldown: 0.02 }],
   nextArrowId: 1,
   nextImpactId: 5,
   unlockedTechs: [],
@@ -67,7 +66,6 @@ test("a saved simulation includes its version and can be loaded", () => {
   assert.equal(loaded.score, 987);
   assert.equal(loaded.time, 42.5);
   assert.equal(loaded.arrows.length, 1);
-  assert.equal(loaded.arrows[0]?.corrosiveWakeCharged, true);
   assert.equal(loaded.shards[0]?.health, 0.6);
   assert.equal(loaded.shards[0]?.growth, 0.42);
   assert.equal(loaded.shards[0]?.growing, true);
@@ -75,24 +73,41 @@ test("a saved simulation includes its version and can be loaded", () => {
   assert.deepEqual(loaded.unlockedTechs, []);
 });
 
-test("a saved simulation preserves purchased technologies", () => {
+test("a current save preserves active technologies without removed branch state", () => {
   const simulation = makeSimulation();
-  simulation.unlockedTechs = ["corrosive-wake", "chosen-one", "resonance", "conduction"];
+  simulation.unlockedTechs = ["resonance", "conduction"];
 
   const loaded = loadSaveState(serializeSaveState(saveStateForSimulation(simulation)));
 
   assert.ok(loaded);
-  assert.deepEqual(loaded.unlockedTechs, ["corrosive-wake", "chosen-one", "resonance", "conduction"]);
+  assert.deepEqual(loaded.unlockedTechs, ["resonance", "conduction"]);
+  assert.equal(loaded.score, 987);
 });
 
-test("a legacy New Growth unlock converts to Corrosive Wake", () => {
+test("removing the Chosen One branch refunds every purchased branch item", () => {
   const legacySave = saveStateForSimulation(makeSimulation()) as Record<string, unknown>;
-  legacySave.unlockedTechs = ["new-growth", "chosen-one"];
+  legacySave.version = SaveStateVersion.V3;
+  legacySave.unlockedTechs = ["chosen-one", "corrosive-wake", "resonance", "conduction"];
 
   const loaded = loadSaveState(JSON.stringify(legacySave));
 
   assert.ok(loaded);
-  assert.deepEqual(loaded.unlockedTechs, ["corrosive-wake", "chosen-one"]);
+  assert.equal(loaded.version, SaveStateVersion.V4);
+  assert.equal(loaded.score, 60_987);
+  assert.deepEqual(loaded.unlockedTechs, ["resonance", "conduction"]);
+});
+
+test("the legacy New Growth alias is refunded as the removed branch upgrade", () => {
+  const legacySave = saveStateForSimulation(makeSimulation()) as Record<string, unknown>;
+  legacySave.version = SaveStateVersion.V2;
+  legacySave.unlockedTechs = ["new-growth"];
+
+  const loaded = loadSaveState(JSON.stringify(legacySave));
+
+  assert.ok(loaded);
+  assert.equal(loaded.version, SaveStateVersion.V4);
+  assert.equal(loaded.score, 50_987);
+  assert.deepEqual(loaded.unlockedTechs, []);
 });
 
 test("every declared save version has a conversion path to the current version", () => {
@@ -119,9 +134,8 @@ test("a legacy V1 save loads without any unlocked technologies", () => {
 
   const loaded = loadSaveState(JSON.stringify(legacySave));
   assert.ok(loaded);
-  assert.equal(loaded.version, SaveStateVersion.V3);
+  assert.equal(loaded.version, SaveStateVersion.V4);
   assert.deepEqual(loaded.unlockedTechs, []);
-  assert.equal(loaded.arrows[0]?.corrosiveWakeCharged, false);
   assert.equal(loaded.shards[0]?.growth, 0);
   assert.equal(loaded.shards[0]?.growing, false);
 });
@@ -144,12 +158,12 @@ test("a legacy V2 save loads with growth defaults", () => {
 
   const loaded = loadSaveState(JSON.stringify(legacySave));
   assert.ok(loaded);
-  assert.equal(loaded.version, SaveStateVersion.V3);
+  assert.equal(loaded.version, SaveStateVersion.V4);
   assert.equal(loaded.shards[0]?.growth, 0);
   assert.equal(loaded.shards[0]?.growing, false);
 });
 
 test("the version enum exposes the current save version", () => {
   assert.ok(SAVE_STATE_VERSIONS.includes(CURRENT_SAVE_STATE_VERSION));
-  assert.equal(CURRENT_SAVE_STATE_VERSION, SaveStateVersion.V3);
+  assert.equal(CURRENT_SAVE_STATE_VERSION, SaveStateVersion.V4);
 });

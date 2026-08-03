@@ -12,7 +12,6 @@ import {
 } from "./camera";
 import {
   BASE_BALL_RADIUS,
-  CORROSIVE_WAKE_DURATION_SECONDS,
   INITIAL_VIEW_RADIUS,
   STARTING_LUMENS,
   TAU,
@@ -210,24 +209,9 @@ const ResonanceIcon = () => (
   </svg>
 );
 
-const ChosenOneIcon = () => (
-  <svg className="chosen-one-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-    <circle cx="12" cy="12" r="3.15" fill="currentColor" />
-    <path d="M12 2.5V6M12 18V21.5M2.5 12H6M18 12H21.5M5.3 5.3L7.8 7.8M16.2 16.2L18.7 18.7M18.7 5.3L16.2 7.8M7.8 16.2L5.3 18.7" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-  </svg>
-);
-
 const ConductionIcon = () => (
   <svg className="conduction-icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
     <path fillRule="evenodd" d="M6.75 3.5L15.25 12L6.75 20.5L1.5 15.25L6.75 10L8.75 12L5.5 15.25L6.75 16.5L11.25 12L6.75 7.5L5.5 8.75L3.5 6.75L6.75 3.5ZM17.25 3.5L22.5 8.75L20.5 10.75L19.25 9.5L14.75 14L19.25 18.5L20.5 17.25L22.5 19.25L17.25 20.5L8.75 12L17.25 3.5Z" />
-  </svg>
-);
-
-const CorrosiveWakeIcon = () => (
-  <svg className="corrosive-wake-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-    <path d="M3.5 7.2C6.4 5.2 8.8 5.2 11.7 7.2C14.6 9.2 17 9.2 20.5 7.2" stroke="currentColor" strokeWidth="1.35" strokeLinecap="round" />
-    <path d="M3.5 12C6.4 10 8.8 10 11.7 12C14.6 14 17 14 20.5 12" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-    <path d="M3.5 16.8C6.4 14.8 8.8 14.8 11.7 16.8C14.6 18.8 17 18.8 20.5 16.8" stroke="currentColor" strokeWidth="1.05" strokeLinecap="round" opacity="0.72" />
   </svg>
 );
 
@@ -236,7 +220,6 @@ const createRenderSimulation = (): Simulation => ({
   broken: new Set(),
   fieldSeed: 0,
   arrows: [],
-  corrosiveWake: [],
   nextArrowId: 1,
   nextImpactId: 1,
   unlockedTechs: [],
@@ -399,7 +382,20 @@ export default function Home() {
     const worker: Worker = new Worker(new URL("./simulation.worker.ts", import.meta.url), { type: "module" });
     let savedGameState: SaveState | null = null;
     try {
-      savedGameState = loadSaveState(window.localStorage.getItem(SAVE_STATE_STORAGE_KEY));
+      const serializedSave = window.localStorage.getItem(SAVE_STATE_STORAGE_KEY);
+      savedGameState = loadSaveState(serializedSave);
+      if (savedGameState && serializedSave) {
+        try {
+          const parsedSave = JSON.parse(serializedSave) as { version?: unknown };
+          if (parsedSave.version !== savedGameState.version) {
+            // Persist migrations immediately so a player cannot lose a refund by
+            // closing the page before the regular save interval fires.
+            window.localStorage.setItem(SAVE_STATE_STORAGE_KEY, serializeSaveState(savedGameState));
+          }
+        } catch {
+          // A storage write failure should not prevent the migrated save from loading.
+        }
+      }
     } catch {
       savedGameState = null;
     }
@@ -671,48 +667,13 @@ export default function Home() {
     };
 
     const drawArrow = (arrow: Arrow) => {
-      const isChosenBall = arrow.id === 0 && sim.unlockedTechs.includes(TECH_IDS.CHOSEN_ONE);
-      const isCorrosiveCharged = arrow.corrosiveWakeCharged;
       context.save();
-      context.shadowBlur = isCorrosiveCharged ? 0.5 : 0.28;
-      context.shadowColor = isCorrosiveCharged
-        ? "rgba(255, 48, 48, 0.94)"
-        : isChosenBall
-          ? "rgba(232, 240, 244, 0.86)"
-          : `hsla(${arrow.hue}, 100%, 74%, 0.8)`;
-      if (isCorrosiveCharged) {
-        context.fillStyle = "rgba(255, 58, 54, 0.22)";
-        context.beginPath();
-        context.arc(arrow.x, arrow.y, sim.ballRadius * 1.9, 0, TAU);
-        context.fill();
-      }
-      context.fillStyle = isCorrosiveCharged
-        ? "#ff7770"
-        : isChosenBall
-          ? "#e1e8ec"
-          : `hsl(${arrow.hue}, 88%, 68%)`;
+      context.shadowBlur = 0.28;
+      context.shadowColor = `hsla(${arrow.hue}, 100%, 74%, 0.8)`;
+      context.fillStyle = `hsl(${arrow.hue}, 88%, 68%)`;
       context.beginPath();
       context.arc(arrow.x, arrow.y, sim.ballRadius, 0, TAU);
       context.fill();
-      context.restore();
-    };
-
-    const drawCorrosiveWake = () => {
-      if (sim.corrosiveWake.length === 0) return;
-      context.save();
-      context.lineCap = "round";
-      context.lineJoin = "round";
-      context.shadowBlur = 0.16;
-      context.shadowColor = "rgba(255, 48, 48, 0.52)";
-      sim.corrosiveWake.forEach((segment) => {
-        const strength = Math.max(0, Math.min(1, 1 - segment.age / CORROSIVE_WAKE_DURATION_SECONDS));
-        context.strokeStyle = `rgba(235, 65, 60, ${0.08 + strength * 0.36})`;
-        context.lineWidth = 0.045 + strength * 0.07;
-        context.beginPath();
-        context.moveTo(segment.startX, segment.startY);
-        context.lineTo(segment.endX, segment.endY);
-        context.stroke();
-      });
       context.restore();
     };
 
@@ -776,7 +737,6 @@ export default function Home() {
         }
       }
 
-      drawCorrosiveWake();
       sim.arrows.forEach((arrow) => drawArrow(arrow));
       context.restore();
 
@@ -904,7 +864,6 @@ export default function Home() {
       }
       if (techStateChanged) setUnlockedTechs([...nextUnlockedTechs]);
       sim.arrows = state.arrows.map((arrow) => ({ ...arrow }));
-      sim.corrosiveWake = state.corrosiveWake.map((segment) => ({ ...segment }));
       const nextBroken = new Set(state.broken);
       sim.broken.forEach((key) => {
         if (!nextBroken.has(key)) invalidateShardChunk(key);
@@ -1129,8 +1088,6 @@ export default function Home() {
                           onClick={() => setSelectedTechId(tech.id)}
                           aria-label={`${tech.title}${unlocked ? " unlocked" : " technology"}`}
                         >
-                          {tech.icon === "chosen-one" && <ChosenOneIcon />}
-                          {tech.icon === "corrosive-wake" && <CorrosiveWakeIcon />}
                           {tech.icon === "resonance" && <ResonanceIcon />}
                           {tech.icon === "conduction" && <ConductionIcon />}
                         </button>

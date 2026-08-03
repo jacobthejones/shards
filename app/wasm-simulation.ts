@@ -1,7 +1,6 @@
 import {
   BASE_BALL_RADIUS,
   type Arrow,
-  type CorrosiveWakeSegment,
   type DynamicShardState,
   keyFor,
   type SimulationEvent,
@@ -20,12 +19,6 @@ type WasmExports = {
   set_tech_resonance: (enabled: number) => number;
   set_tech_resonance_state: (enabled: number) => void;
   get_tech_resonance: () => number;
-  set_tech_chosen_one: (enabled: number) => number;
-  set_tech_chosen_one_state: (enabled: number) => void;
-  get_tech_chosen_one: () => number;
-  set_tech_corrosive_wake: (enabled: number) => number;
-  set_tech_corrosive_wake_state: (enabled: number) => void;
-  get_tech_corrosive_wake: () => number;
   set_tech_conduction: (enabled: number) => number;
   set_tech_conduction_state: (enabled: number) => void;
   get_tech_conduction: () => number;
@@ -34,7 +27,6 @@ type WasmExports = {
   set_random_state: (state: number) => void;
   set_next_impact_id: (id: number) => void;
   set_ball_state: (index: number, x: number, y: number, vx: number, vy: number, cooldown: number) => void;
-  set_ball_corrosive_wake_charge: (index: number, charged: number) => void;
   contain_ball: (index: number) => void;
   set_all_shards_broken: (broken: number) => void;
   set_shard_broken: (shard: number, broken: number) => void;
@@ -56,13 +48,6 @@ type WasmExports = {
   get_ball_vx: (index: number) => number;
   get_ball_vy: (index: number) => number;
   get_arrow_hit_cooldown: (index: number) => number;
-  get_ball_corrosive_wake_charge: (index: number) => number;
-  get_corrosive_wake_count: () => number;
-  get_corrosive_wake_start_x: (index: number) => number;
-  get_corrosive_wake_start_y: (index: number) => number;
-  get_corrosive_wake_end_x: (index: number) => number;
-  get_corrosive_wake_end_y: (index: number) => number;
-  get_corrosive_wake_age: (index: number) => number;
   get_shard_count: () => number;
   get_shard_gx: (index: number) => number;
   get_shard_gy: (index: number) => number;
@@ -134,8 +119,6 @@ export class WasmSimulation {
   private paused = true;
   private awaitingStart = true;
   private nextArrowId = 1;
-  private chosenOneUnlocked = false;
-  private corrosiveWakeUnlocked = false;
   private resonanceUnlocked = false;
   private conductionUnlocked = false;
 
@@ -145,8 +128,6 @@ export class WasmSimulation {
       hue: index === 0 ? 188 : 190 + (index - 1) * 22,
     }));
     this.nextArrowId = ballCount;
-    this.chosenOneUnlocked = false;
-    this.corrosiveWakeUnlocked = false;
     this.resonanceUnlocked = false;
     this.conductionUnlocked = false;
     this.damagedShardIndices.clear();
@@ -200,17 +181,6 @@ export class WasmSimulation {
       vy: this.wasm.get_ball_vy(index),
       hue: this.arrowMeta[index].hue,
       hitCooldown: this.wasm.get_arrow_hit_cooldown(index),
-      corrosiveWakeCharged: this.wasm.get_ball_corrosive_wake_charge(index) !== 0,
-    }));
-  }
-
-  private readCorrosiveWake(): CorrosiveWakeSegment[] {
-    return Array.from({ length: this.wasm.get_corrosive_wake_count() }, (_, index) => ({
-      startX: this.wasm.get_corrosive_wake_start_x(index),
-      startY: this.wasm.get_corrosive_wake_start_y(index),
-      endX: this.wasm.get_corrosive_wake_end_x(index),
-      endY: this.wasm.get_corrosive_wake_end_y(index),
-      age: this.wasm.get_corrosive_wake_age(index),
     }));
   }
 
@@ -270,13 +240,10 @@ export class WasmSimulation {
       nextArrowId: this.nextArrowId,
       nextImpactId: this.wasm.get_next_impact_id(),
       unlockedTechs: [
-        ...(this.corrosiveWakeUnlocked ? [TECH_IDS.CORROSIVE_WAKE] : []),
-        ...(this.chosenOneUnlocked ? [TECH_IDS.CHOSEN_ONE] : []),
         ...(this.resonanceUnlocked ? [TECH_IDS.RESONANCE] : []),
         ...(this.conductionUnlocked ? [TECH_IDS.CONDUCTION] : []),
       ],
       arrows: this.readArrows(),
-      corrosiveWake: this.readCorrosiveWake(),
       broken: [...this.brokenShardIndices].map((index) => this.staticShards[index].key),
       shards: this.readDynamicShards(),
     };
@@ -287,12 +254,9 @@ export class WasmSimulation {
     this.wasm.initialize_real_simulation(seed, Number.NaN, 1);
     this.wasm.set_score(0);
     this.initializeMeta(1);
-    this.wasm.set_tech_chosen_one_state(0);
-    this.wasm.set_tech_corrosive_wake_state(0);
     this.wasm.set_tech_resonance_state(0);
     this.wasm.set_tech_conduction_state(0);
     this.resonanceUnlocked = false;
-    this.corrosiveWakeUnlocked = false;
     this.conductionUnlocked = false;
     this.paused = true;
     this.awaitingStart = true;
@@ -306,12 +270,8 @@ export class WasmSimulation {
     this.wasm.set_simulation_meta(save.time, save.score, save.totalHits, save.totalBreaks, save.recentBreakRate);
     this.wasm.set_random_state(save.randomState);
     this.wasm.set_next_impact_id(save.nextImpactId);
-    this.chosenOneUnlocked = save.unlockedTechs.includes(TECH_IDS.CHOSEN_ONE);
-    this.corrosiveWakeUnlocked = this.chosenOneUnlocked && save.unlockedTechs.includes(TECH_IDS.CORROSIVE_WAKE);
     this.resonanceUnlocked = save.unlockedTechs.includes(TECH_IDS.RESONANCE);
     this.conductionUnlocked = this.resonanceUnlocked && save.unlockedTechs.includes(TECH_IDS.CONDUCTION);
-    this.wasm.set_tech_chosen_one_state(this.chosenOneUnlocked ? 1 : 0);
-    this.wasm.set_tech_corrosive_wake_state(this.corrosiveWakeUnlocked ? 1 : 0);
     this.wasm.set_tech_resonance_state(this.resonanceUnlocked ? 1 : 0);
     this.wasm.set_tech_conduction_state(this.conductionUnlocked ? 1 : 0);
     this.readStaticShards();
@@ -326,7 +286,6 @@ export class WasmSimulation {
     save.arrows.forEach((arrow, index) => {
       this.arrowMeta[index] = { id: arrow.id, hue: arrow.hue };
       this.wasm.set_ball_state(index, arrow.x, arrow.y, arrow.vx, arrow.vy, arrow.hitCooldown);
-      this.wasm.set_ball_corrosive_wake_charge(index, arrow.corrosiveWakeCharged ? 1 : 0);
       this.wasm.contain_ball(index);
     });
     save.shards.forEach((savedShard) => {
@@ -366,16 +325,6 @@ export class WasmSimulation {
   }
 
   setTech(tech: TechId, enabled: boolean): boolean {
-    if (tech === TECH_IDS.CHOSEN_ONE) {
-      const changed = this.wasm.set_tech_chosen_one(enabled ? 1 : 0) !== 0;
-      if (changed) this.chosenOneUnlocked = enabled;
-      return changed;
-    }
-    if (tech === TECH_IDS.CORROSIVE_WAKE) {
-      const changed = this.wasm.set_tech_corrosive_wake(enabled ? 1 : 0) !== 0;
-      if (changed) this.corrosiveWakeUnlocked = enabled;
-      return changed;
-    }
     if (tech === TECH_IDS.RESONANCE) {
       const changed = this.wasm.set_tech_resonance(enabled ? 1 : 0) !== 0;
       if (changed) this.resonanceUnlocked = enabled;

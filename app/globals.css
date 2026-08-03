@@ -322,9 +322,7 @@ button:focus-visible {
 }
 
 .resonance-icon,
-.conduction-icon,
-.chosen-one-icon,
-.corrosive-wake-icon {
+.conduction-icon {
   display: block;
   width: 29px;
   height: 29px;
