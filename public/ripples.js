@@ -21,9 +21,9 @@
     { name: "fire", hue: 20, color: "#f1b18c", beats: 1, rgb: [241, 177, 140] },
   ];
   const NEIGHBOR_DIRECTIONS = [
-    [-1, -1], [0, -1], [1, -1],
-    [-1, 0], [1, 0],
-    [-1, 1], [0, 1], [1, 1],
+    [-1, -1, Math.SQRT2], [0, -1, 1], [1, -1, Math.SQRT2],
+    [-1, 0, 1], [1, 0, 1],
+    [-1, 1, Math.SQRT2], [0, 1, 1], [1, 1, Math.SQRT2],
   ];
   const distanceSquared = (first, second) => {
     const dx = first.x - second.x;
@@ -109,29 +109,38 @@
       kinds,
       pendingKinds,
       captureProgress,
+      pendingStepLengths: new Float32Array(cellCount),
       inside: Array.from({ length: cellCount }, (_, index) => isInsideField(index % GRID_SIZE, Math.floor(index / GRID_SIZE))),
     };
   };
   const field = createGridState();
   const chooseInvader = (x, y, currentKind, pendingKind) => {
     const support = [0, 0, 0];
-    for (const [offsetX, offsetY] of NEIGHBOR_DIRECTIONS) {
+    const nearestDistance = [Infinity, Infinity, Infinity];
+    for (const [offsetX, offsetY, stepLength] of NEIGHBOR_DIRECTIONS) {
       const neighborX = x + offsetX;
       const neighborY = y + offsetY;
       if (neighborX < 0 || neighborX >= GRID_SIZE || neighborY < 0 || neighborY >= GRID_SIZE) continue;
       const neighborKind = field.kinds[gridCellIndex(neighborX, neighborY)];
       if (neighborKind < 0) continue;
-      if (currentKind < 0 || beats(neighborKind, currentKind)) support[neighborKind] += 1;
+      if (currentKind < 0 || beats(neighborKind, currentKind)) {
+        support[neighborKind] += 1 / stepLength;
+        nearestDistance[neighborKind] = Math.min(nearestDistance[neighborKind], stepLength);
+      }
     }
     const strongestSupport = Math.max(...support);
-    if (strongestSupport === 0) return EMPTY_KIND;
-    if (pendingKind >= 0 && support[pendingKind] === strongestSupport) return pendingKind;
+    if (strongestSupport === 0) return { kind: EMPTY_KIND, stepLength: 0 };
+    if (pendingKind >= 0 && support[pendingKind] >= strongestSupport - 0.001) {
+      return { kind: pendingKind, stepLength: nearestDistance[pendingKind] };
+    }
     const tieStart = (x * 17 + y * 31) % ELEMENTS.length;
     for (let offset = 0; offset < ELEMENTS.length; offset += 1) {
       const candidateKind = (tieStart + offset) % ELEMENTS.length;
-      if (support[candidateKind] === strongestSupport) return candidateKind;
+      if (support[candidateKind] >= strongestSupport - 0.001) {
+        return { kind: candidateKind, stepLength: nearestDistance[candidateKind] };
+      }
     }
-    return EMPTY_KIND;
+    return { kind: EMPTY_KIND, stepLength: 0 };
   };
   let fieldStep = 0;
   const advanceField = (distance) => {
@@ -144,17 +153,22 @@
         const index = gridCellIndex(x, y);
         if (!field.inside[index]) continue;
         const invader = chooseInvader(x, y, field.kinds[index], field.pendingKinds[index]);
-        if (invader < 0) {
+        if (invader.kind < 0) {
           field.pendingKinds[index] = EMPTY_KIND;
           field.captureProgress[index] = 0;
+          field.pendingStepLengths[index] = 0;
           continue;
         }
-        if (field.pendingKinds[index] !== invader) field.captureProgress[index] = 0;
-        field.pendingKinds[index] = invader;
-        field.captureProgress[index] += distance;
+        if (field.pendingKinds[index] !== invader.kind || field.pendingStepLengths[index] !== invader.stepLength) {
+          field.captureProgress[index] = 0;
+        }
+        field.pendingKinds[index] = invader.kind;
+        field.pendingStepLengths[index] = invader.stepLength;
+        field.captureProgress[index] += distance / invader.stepLength;
         if (field.captureProgress[index] >= 1) {
-          field.kinds[index] = invader;
+          field.kinds[index] = invader.kind;
           field.pendingKinds[index] = EMPTY_KIND;
+          field.pendingStepLengths[index] = 0;
           field.captureProgress[index] = 0;
         }
       }
