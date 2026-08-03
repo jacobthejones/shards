@@ -25,10 +25,10 @@ for (const filePath of await collectFiles(outputRoot)) {
   const source = await readFile(filePath, "utf8");
   const rewritten = source
     .replaceAll("/assets/", "/shards/assets/")
-    // Vinext keeps some lazy chunk references relative to the asset directory.
-    // Make those project-site-safe too; otherwise they resolve from /assets.
-    .replaceAll('"assets/', '"/shards/assets/')
-    .replaceAll("'assets/", "'/shards/assets/")
+    // Vinext prepends a slash when resolving these dependency-map entries.
+    // Keep the project prefix slash-free here, or they become //shards/... URLs.
+    .replaceAll('"assets/', '"shards/assets/')
+    .replaceAll("'assets/", "'shards/assets/")
     .replaceAll("/favicon.svg", "/shards/favicon.svg")
     .replaceAll("/simulation.wasm", "/shards/simulation.wasm")
     .replaceAll(/\/shards\/assets\/([A-Za-z0-9._-]+)/g, `/shards/assets/$1?v=${assetVersion}`);
