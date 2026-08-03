@@ -173,3 +173,13 @@ test("keeps the prototype self-contained", async () => {
   assert.match(renderCache, /class RenderChunkCache/);
   assert.match(renderCache, /renderChunkSignature/);
 });
+
+test("keeps the ripple field elemental and particle-free", async () => {
+  const ripples = await readFile(new URL("../public/ripples.js", import.meta.url), "utf8");
+
+  assert.match(ripples, /RIPPLE_SPEED_PX_PER_SECOND = 18 \/ 5/);
+  assert.match(ripples, /name: "water"[\s\S]*beats: 2/);
+  assert.match(ripples, /name: "plant"[\s\S]*beats: 0/);
+  assert.match(ripples, /name: "fire"[\s\S]*beats: 1/);
+  assert.doesNotMatch(ripples, /particle|reaction/i);
+});

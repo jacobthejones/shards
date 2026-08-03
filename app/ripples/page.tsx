@@ -106,7 +106,7 @@ export default function Ripples() {
       <canvas
         data-ripples-canvas
         style={canvasStyle}
-        aria-label="Fifteen pastel light sources sending out expanding ripples"
+        aria-label="Water, plant, and fire sources sending out expanding elemental ripples"
       />
       <div aria-hidden="true" style={{ ...overlayStyle, background: "radial-gradient(circle at center, transparent 35%, rgba(1, 7, 11, 0.42) 100%)" }} />
       <div aria-hidden="true" style={{ ...overlayStyle, background: "linear-gradient(180deg, rgba(3, 10, 15, 0.52), transparent 20%, transparent 79%, rgba(3, 10, 15, 0.65)), linear-gradient(90deg, rgba(3, 10, 15, 0.18), transparent 24%, transparent 76%, rgba(3, 10, 15, 0.18))" }} />
