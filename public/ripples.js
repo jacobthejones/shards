@@ -9,21 +9,36 @@
   const RIPPLE_SPEED_PX_PER_SECOND = 18 / 5;
   const FIELD_RADIUS_FRACTION = 0.38;
   const OUTER_RING_HUE = 43;
-  const MAX_CAPTURE_DISTANCE = 0.45;
+  const EMPTY_KIND = -1;
+  const PRODUCTION_GRID_SIZE = 192;
+  const TEST_GRID_SIZE = 96;
+  const GRID_SIZE = canvas.dataset?.ripplesTest ? TEST_GRID_SIZE : PRODUCTION_GRID_SIZE;
+  const GRID_RADIUS = GRID_SIZE / 2 - 1;
+  const SEED_RADIUS = 0.018;
   const ELEMENTS = [
-    { name: "water", hue: 196, color: "#9ed9ee", beats: 2 },
-    { name: "plant", hue: 104, color: "#b9e39f", beats: 0 },
-    { name: "fire", hue: 20, color: "#f1b18c", beats: 1 },
+    { name: "water", hue: 196, color: "#9ed9ee", beats: 2, rgb: [158, 217, 238] },
+    { name: "plant", hue: 104, color: "#b9e39f", beats: 0, rgb: [185, 227, 159] },
+    { name: "fire", hue: 20, color: "#f1b18c", beats: 1, rgb: [241, 177, 140] },
+  ];
+  const NEIGHBOR_DIRECTIONS = [
+    [-1, -1], [0, -1], [1, -1],
+    [-1, 0], [1, 0],
+    [-1, 1], [0, 1], [1, 1],
   ];
   const distanceSquared = (first, second) => {
     const dx = first.x - second.x;
     const dy = first.y - second.y;
     return dx * dx + dy * dy;
   };
-  const pastelColor = (hue, alpha) => `hsla(${hue}, 64%, 80%, ${alpha})`;
   const beats = (firstKind, secondKind) => ELEMENTS[firstKind].beats === secondKind;
   const createSources = () => {
-    if (canvas.dataset?.ripplesTest === "center-empty") return [{ x: 0, y: 0, kind: 0 }];
+    const emptyKindForTest = {
+      "center-empty": 0,
+      "center-empty-water": 0,
+      "center-empty-plant": 1,
+      "center-empty-fire": 2,
+    }[canvas.dataset?.ripplesTest];
+    if (emptyKindForTest !== undefined) return [{ x: 0, y: 0, kind: emptyKindForTest }];
     const dominantKindForTest = {
       "center-dominant": 0,
       "center-water": 0,
@@ -38,6 +53,13 @@
         sources.push({ x: Math.cos(angle) * 0.2, y: Math.sin(angle) * 0.2, kind: losingKind });
       }
       return sources;
+    }
+    if (canvas.dataset?.ripplesTest === "three-wedges") {
+      return [
+        { x: -0.56, y: 0, kind: 0 },
+        { x: 0.28, y: 0.485, kind: 1 },
+        { x: 0.28, y: -0.485, kind: 2 },
+      ];
     }
     const sources = [];
     let attempts = 0;
@@ -54,103 +76,131 @@
     }
     return sources;
   };
-  const createInteractions = (sources) => {
-    const pairs = [];
-    const bySource = sources.map(() => []);
-    for (let firstIndex = 0; firstIndex < sources.length; firstIndex += 1) {
-      for (let secondIndex = firstIndex + 1; secondIndex < sources.length; secondIndex += 1) {
-        const pair = { firstIndex, secondIndex, captureDistance: 0 };
-        pairs.push(pair);
-        bySource[firstIndex][secondIndex] = pair;
-        bySource[secondIndex][firstIndex] = pair;
+  const sources = createSources();
+  const gridCellIndex = (x, y) => y * GRID_SIZE + x;
+  const isInsideField = (x, y) => {
+    const normalizedX = (x - GRID_RADIUS) / GRID_RADIUS;
+    const normalizedY = (y - GRID_RADIUS) / GRID_RADIUS;
+    return normalizedX * normalizedX + normalizedY * normalizedY <= 1;
+  };
+  const createGridState = () => {
+    const cellCount = GRID_SIZE * GRID_SIZE;
+    const kinds = new Int8Array(cellCount);
+    const pendingKinds = new Int8Array(cellCount);
+    const captureProgress = new Float32Array(cellCount);
+    kinds.fill(EMPTY_KIND);
+    pendingKinds.fill(EMPTY_KIND);
+    for (let y = 0; y < GRID_SIZE; y += 1) {
+      for (let x = 0; x < GRID_SIZE; x += 1) {
+        if (!isInsideField(x, y)) continue;
+        const normalizedPosition = {
+          x: (x - GRID_RADIUS) / GRID_RADIUS,
+          y: (y - GRID_RADIUS) / GRID_RADIUS,
+        };
+        for (const source of sources) {
+          if (distanceSquared(source, normalizedPosition) <= SEED_RADIUS * SEED_RADIUS) {
+            kinds[gridCellIndex(x, y)] = source.kind;
+            break;
+          }
+        }
       }
     }
-    return { pairs, bySource };
+    return {
+      kinds,
+      pendingKinds,
+      captureProgress,
+      inside: Array.from({ length: cellCount }, (_, index) => isInsideField(index % GRID_SIZE, Math.floor(index / GRID_SIZE))),
+    };
   };
-  const updateDominance = (sources, interactions, rippleRadius, rippleExpansion) => {
-    interactions.pairs.forEach((pair) => {
-      const first = sources[pair.firstIndex];
-      const second = sources[pair.secondIndex];
-      if (first.kind === second.kind) return;
-      if (rippleRadius * 2 <= Math.sqrt(distanceSquared(first, second))) return;
-      pair.captureDistance = Math.min(MAX_CAPTURE_DISTANCE, pair.captureDistance + rippleExpansion);
-    });
+  const field = createGridState();
+  const chooseInvader = (x, y, currentKind, pendingKind) => {
+    const support = [0, 0, 0];
+    for (const [offsetX, offsetY] of NEIGHBOR_DIRECTIONS) {
+      const neighborX = x + offsetX;
+      const neighborY = y + offsetY;
+      if (neighborX < 0 || neighborX >= GRID_SIZE || neighborY < 0 || neighborY >= GRID_SIZE) continue;
+      const neighborKind = field.kinds[gridCellIndex(neighborX, neighborY)];
+      if (neighborKind < 0) continue;
+      if (currentKind < 0 || beats(neighborKind, currentKind)) support[neighborKind] += 1;
+    }
+    const strongestSupport = Math.max(...support);
+    if (strongestSupport === 0) return EMPTY_KIND;
+    if (pendingKind >= 0 && support[pendingKind] === strongestSupport) return pendingKind;
+    const tieStart = (x * 17 + y * 31) % ELEMENTS.length;
+    for (let offset = 0; offset < ELEMENTS.length; offset += 1) {
+      const candidateKind = (tieStart + offset) % ELEMENTS.length;
+      if (support[candidateKind] === strongestSupport) return candidateKind;
+    }
+    return EMPTY_KIND;
   };
-  const elementLayers = [];
-  const drawElementRegions = (sources, interactions, rippleRadius, pixelScale) => {
-    const drawOrder = sources.map((source, sourceIndex) => {
-      let priority = sourceIndex * 0.000001;
-      for (let otherIndex = 0; otherIndex < sources.length; otherIndex += 1) {
-        if (otherIndex === sourceIndex) continue;
-        const other = sources[otherIndex];
-        if (source.kind === other.kind || rippleRadius * 2 <= Math.sqrt(distanceSquared(source, other))) continue;
-        const pair = interactions.bySource[sourceIndex][otherIndex];
-        const winnerIndex = beats(sources[pair.firstIndex].kind, sources[pair.secondIndex].kind)
-          ? pair.firstIndex
-          : pair.secondIndex;
-        priority += (winnerIndex === sourceIndex ? 1 : -1) * (0.001 + pair.captureDistance);
+  let fieldStep = 0;
+  const advanceField = (distance) => {
+    const rowOffset = fieldStep % GRID_SIZE;
+    const columnOffset = (fieldStep * 17) % GRID_SIZE;
+    for (let row = 1; row < GRID_SIZE - 1; row += 1) {
+      const y = ((row + rowOffset) % (GRID_SIZE - 2)) + 1;
+      for (let column = 1; column < GRID_SIZE - 1; column += 1) {
+        const x = ((column + columnOffset) % (GRID_SIZE - 2)) + 1;
+        const index = gridCellIndex(x, y);
+        if (!field.inside[index]) continue;
+        const invader = chooseInvader(x, y, field.kinds[index], field.pendingKinds[index]);
+        if (invader < 0) {
+          field.pendingKinds[index] = EMPTY_KIND;
+          field.captureProgress[index] = 0;
+          continue;
+        }
+        if (field.pendingKinds[index] !== invader) field.captureProgress[index] = 0;
+        field.pendingKinds[index] = invader;
+        field.captureProgress[index] += distance;
+        if (field.captureProgress[index] >= 1) {
+          field.kinds[index] = invader;
+          field.pendingKinds[index] = EMPTY_KIND;
+          field.captureProgress[index] = 0;
+        }
       }
-      return { source, priority };
-    }).sort((first, second) => first.priority - second.priority);
-
+    }
+    fieldStep += 1;
+  };
+  const fieldCanvas = typeof document.createElement === "function" ? document.createElement("canvas") : null;
+  const fieldContext = fieldCanvas?.getContext("2d") ?? null;
+  let fieldImageData = null;
+  if (fieldCanvas && fieldContext?.createImageData) {
+    fieldCanvas.width = GRID_SIZE;
+    fieldCanvas.height = GRID_SIZE;
+    fieldImageData = fieldContext.createImageData(GRID_SIZE, GRID_SIZE);
+  }
+  const blendChannel = (first, second, amount) => Math.round(first + (second - first) * amount);
+  const drawFieldImage = () => {
+    if (!fieldContext || !fieldImageData) return;
+    for (let index = 0; index < field.kinds.length; index += 1) {
+      const pixelIndex = index * 4;
+      const currentKind = field.kinds[index];
+      const pendingKind = field.pendingKinds[index];
+      const amount = Math.min(1, field.captureProgress[index]);
+      if (currentKind < 0 && pendingKind < 0) {
+        fieldImageData.data[pixelIndex + 3] = 0;
+        continue;
+      }
+      const firstColor = currentKind < 0 ? [0, 0, 0] : ELEMENTS[currentKind].rgb;
+      const secondColor = pendingKind < 0 ? firstColor : ELEMENTS[pendingKind].rgb;
+      const alpha = currentKind < 0 ? Math.round(amount * 255) : 255;
+      fieldImageData.data[pixelIndex] = blendChannel(firstColor[0], secondColor[0], amount);
+      fieldImageData.data[pixelIndex + 1] = blendChannel(firstColor[1], secondColor[1], amount);
+      fieldImageData.data[pixelIndex + 2] = blendChannel(firstColor[2], secondColor[2], amount);
+      fieldImageData.data[pixelIndex + 3] = alpha;
+    }
+    fieldContext.putImageData(fieldImageData, 0, 0);
+  };
+  const drawElementRegions = () => {
+    drawFieldImage();
+    if (!fieldCanvas || typeof context.drawImage !== "function") return;
     context.save();
     context.beginPath();
     context.arc(0, 0, 1, 0, Math.PI * 2);
     context.clip();
-    drawOrder.forEach(({ source }) => {
-      const element = ELEMENTS[source.kind];
-      context.beginPath();
-      context.arc(source.x, source.y, Math.max(0.002, rippleRadius), 0, Math.PI * 2);
-      context.fillStyle = element.color;
-      context.shadowColor = pastelColor(element.hue, 0.38);
-      context.shadowBlur = 10 / pixelScale;
-      context.fill();
-      context.shadowBlur = 0;
-    });
+    context.imageSmoothingEnabled = true;
+    context.drawImage(fieldCanvas, -1, -1, 2, 2);
     context.restore();
-
-    if (typeof document.createElement !== "function" || typeof context.drawImage !== "function") return;
-    while (elementLayers.length < sources.length) {
-      const layerCanvas = document.createElement("canvas");
-      const layerContext = layerCanvas.getContext("2d");
-      if (!layerContext) return;
-      elementLayers.push({ canvas: layerCanvas, context: layerContext });
-    }
-    sources.forEach((source, sourceIndex) => {
-      const layer = elementLayers[sourceIndex];
-      if (layer.canvas.width !== canvas.width || layer.canvas.height !== canvas.height) {
-        layer.canvas.width = canvas.width;
-        layer.canvas.height = canvas.height;
-      }
-      const layerContext = layer.context;
-      layerContext.setTransform(1, 0, 0, 1, 0, 0);
-      layerContext.clearRect(0, 0, layer.canvas.width, layer.canvas.height);
-      layerContext.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
-      layerContext.save();
-      layerContext.translate(width / 2, height * 0.53);
-      layerContext.scale(Math.min(width, height) * FIELD_RADIUS_FRACTION, Math.min(width, height) * FIELD_RADIUS_FRACTION);
-      layerContext.beginPath();
-      layerContext.arc(0, 0, 1, 0, Math.PI * 2);
-      layerContext.clip();
-      layerContext.beginPath();
-      layerContext.arc(source.x, source.y, Math.max(0.002, rippleRadius), 0, Math.PI * 2);
-      layerContext.fillStyle = ELEMENTS[source.kind].color;
-      layerContext.fill();
-      layerContext.globalCompositeOperation = "destination-out";
-      for (let otherIndex = 0; otherIndex < sources.length; otherIndex += 1) {
-        if (otherIndex === sourceIndex) continue;
-        const other = sources[otherIndex];
-        if (other.kind === source.kind || !beats(other.kind, source.kind)) continue;
-        layerContext.beginPath();
-        layerContext.arc(other.x, other.y, Math.max(0.002, rippleRadius), 0, Math.PI * 2);
-        layerContext.fill();
-      }
-      layerContext.restore();
-      context.save();
-      context.setTransform(1, 0, 0, 1, 0, 0);
-      context.drawImage(layer.canvas, 0, 0);
-      context.restore();
-    });
   };
   const drawFieldOutline = (fieldRadius, pixelScale) => {
     context.beginPath();
@@ -168,32 +218,53 @@
     context.stroke();
     context.shadowBlur = 0;
   };
-  const drawSources = (sources, pixelScale) => {
+  const drawSources = (pixelScale, opacity) => {
+    if (opacity <= 0) return;
     sources.forEach((source) => {
       const element = ELEMENTS[source.kind];
       context.beginPath();
-      context.arc(source.x, source.y, 0.026, 0, Math.PI * 2);
+      context.arc(source.x, source.y, 0.018, 0, Math.PI * 2);
       context.fillStyle = element.color;
+      context.globalAlpha = opacity;
       context.shadowColor = element.color;
-      context.shadowBlur = 13 / pixelScale;
+      context.shadowBlur = 9 / pixelScale;
       context.fill();
+      context.globalAlpha = 1;
       context.beginPath();
-      context.arc(source.x, source.y, 0.008, 0, Math.PI * 2);
+      context.arc(source.x, source.y, 0.006, 0, Math.PI * 2);
       context.fillStyle = "rgba(255, 255, 247, 0.92)";
+      context.globalAlpha = opacity;
       context.shadowBlur = 0;
       context.fill();
+      context.globalAlpha = 1;
     });
   };
 
-  const sources = createSources();
-  const interactions = createInteractions(sources);
   const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const testSpeedMultiplier = canvas.dataset?.ripplesTest ? 8 : 1;
   let width = 1;
   let height = 1;
   let devicePixelRatio = 1;
+  let simulationAge = 0;
   let lastTime = performance.now();
-  let rippleRadius = reducedMotion ? 1.08 : 0;
-  let finished = reducedMotion;
+  const getTestState = () => ({
+    age: simulationAge,
+    gridSize: GRID_SIZE,
+    snapshot: () => Array.from(field.kinds),
+    centroids: () => ELEMENTS.map((element, kind) => {
+      let x = 0;
+      let y = 0;
+      let count = 0;
+      for (let index = 0; index < field.kinds.length; index += 1) {
+        if (field.kinds[index] !== kind) continue;
+        x += (index % GRID_SIZE) - GRID_RADIUS;
+        y += Math.floor(index / GRID_SIZE) - GRID_RADIUS;
+        count += 1;
+      }
+      return { name: element.name, angle: Math.atan2(y, x), count };
+    }),
+  });
+  if (canvas.dataset?.ripplesTest) canvas.__ripplesTest = getTestState;
 
   const draw = () => {
     const fieldRadius = Math.min(width, height) * FIELD_RADIUS_FRACTION;
@@ -201,9 +272,9 @@
     context.save();
     context.translate(width / 2, height * 0.53);
     context.scale(fieldRadius, fieldRadius);
-    drawElementRegions(sources, interactions, rippleRadius, fieldRadius);
+    drawElementRegions();
+    drawSources(fieldRadius, Math.max(0, 1 - simulationAge / 8));
     drawFieldOutline(1, fieldRadius);
-    drawSources(sources, fieldRadius);
     context.restore();
   };
   const resize = () => {
@@ -219,13 +290,10 @@
   const tick = (now) => {
     const elapsed = Math.min(0.05, Math.max(0, (now - lastTime) / 1000));
     lastTime = now;
-    const previousRippleRadius = rippleRadius;
-    if (!finished) {
-      rippleRadius = Math.min(1.08, rippleRadius + (RIPPLE_SPEED_PX_PER_SECOND / Math.max(1, Math.min(width, height) * FIELD_RADIUS_FRACTION)) * elapsed);
-      if (rippleRadius >= 1.08) finished = true;
-    }
-    const rippleExpansion = rippleRadius - previousRippleRadius;
-    updateDominance(sources, interactions, rippleRadius, rippleExpansion);
+    simulationAge += elapsed;
+    const fieldRadius = Math.min(width, height) * FIELD_RADIUS_FRACTION;
+    const cellsPerSecond = (RIPPLE_SPEED_PX_PER_SECOND * GRID_RADIUS * testSpeedMultiplier) / Math.max(1, fieldRadius);
+    advanceField(cellsPerSecond * elapsed);
     draw();
     window.requestAnimationFrame(tick);
   };
