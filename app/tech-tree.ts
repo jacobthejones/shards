@@ -8,9 +8,9 @@ export const TECH_IDS = {
 export type TechId = typeof TECH_IDS[keyof typeof TECH_IDS];
 
 export const RESONANCE_COST = 10_000;
-export const CONDUCTION_COST = 25_000;
+export const CONDUCTION_COST = 50_000;
 export const CHOSEN_ONE_COST = 10_000;
-export const NEW_GROWTH_COST = 25_000;
+export const NEW_GROWTH_COST = 50_000;
 
 export type TechIcon = "new-growth" | "chosen-one" | "resonance" | "conduction";
 

@@ -9,6 +9,7 @@
 #define GRID_CELLS (GRID_SIZE * GRID_SIZE)
 #define MAX_SHARDS 10000
 #define MAX_CELL_POINTS 32
+#define FIELD_SITE_RADIUS 24.0
 #define MAX_IMPACTS 64
 #define MAX_BALLS 256
 #define MAX_EVENTS_PER_STEP 1024
@@ -26,14 +27,14 @@
 #define INITIAL_BALL_COST 300.0
 #define BALL_COST_GROWTH 1.2
 #define RESONANCE_COST 10000.0
-#define CONDUCTION_COST 25000.0
+#define CONDUCTION_COST 50000.0
 #define CHOSEN_ONE_COST 10000.0
-#define NEW_GROWTH_COST 25000.0
+#define NEW_GROWTH_COST 50000.0
 #define RESONANCE_SPLASH_DAMAGE 0.1
 #define CONDUCTION_SPLASH_DAMAGE 0.05
 #define CHOSEN_ONE_DAMAGE_MULTIPLIER 5.0
 #define CHOSEN_BALL_INDEX 0
-#define SIMULATION_RUNTIME_VERSION 7
+#define SIMULATION_RUNTIME_VERSION 8
 #define BOUNCE_JITTER_RADIANS (0.02 * 3.1415926535897932384626433832795 / 180.0)
 #define COLLISION_SEPARATION 0.004
 #define MAX_COLLISIONS_PER_STEP 4
@@ -552,6 +553,91 @@ static int32_t edge_is_shared_with_field(int32_t shard, int32_t edge_index) {
   return 0;
 }
 
+static int32_t point_inside_boundary(double x, double y) {
+  int32_t inside = 0;
+  for (int32_t shard = 0; shard < shard_count; shard += 1) {
+    int32_t start = shard * MAX_CELL_POINTS;
+    int32_t count = POINT_COUNT[shard];
+    for (int32_t edge = 0; edge < count; edge += 1) {
+      if (!SHARD_BOUNDARY_EDGE[start + edge]) continue;
+      int32_t next = (edge + 1) % count;
+      double ax = POINT_X[start + edge];
+      double ay = POINT_Y[start + edge];
+      double bx = POINT_X[start + next];
+      double by = POINT_Y[start + next];
+      if ((ay > y) == (by > y)) continue;
+      double crossing_x = ax + (y - ay) * (bx - ax) / (by - ay);
+      if (x < crossing_x) inside = !inside;
+    }
+  }
+  return inside;
+}
+
+static int32_t nearest_boundary_feature(
+  double x,
+  double y,
+  double *point_x,
+  double *point_y,
+  double *inward_x,
+  double *inward_y,
+  double *distance
+) {
+  double best_distance_squared = 1.7976931348623157e+308;
+  int32_t found = 0;
+  for (int32_t shard = 0; shard < shard_count; shard += 1) {
+    int32_t start = shard * MAX_CELL_POINTS;
+    int32_t count = POINT_COUNT[shard];
+    for (int32_t edge = 0; edge < count; edge += 1) {
+      if (!SHARD_BOUNDARY_EDGE[start + edge]) continue;
+      int32_t next = (edge + 1) % count;
+      double ax = POINT_X[start + edge];
+      double ay = POINT_Y[start + edge];
+      double bx = POINT_X[start + next];
+      double by = POINT_Y[start + next];
+      double candidate_x, candidate_y;
+      closest_point_on_segment(x, y, ax, ay, bx, by, &candidate_x, &candidate_y);
+      double offset_x = x - candidate_x;
+      double offset_y = y - candidate_y;
+      double distance_squared = offset_x * offset_x + offset_y * offset_y;
+      if (distance_squared >= best_distance_squared) continue;
+
+      double edge_x = bx - ax;
+      double edge_y = by - ay;
+      double candidate_inward_x = -edge_y;
+      double candidate_inward_y = edge_x;
+      double midpoint_x = (ax + bx) / 2.0;
+      double midpoint_y = (ay + by) / 2.0;
+      if (candidate_inward_x * (SHARD_SX[shard] - midpoint_x)
+        + candidate_inward_y * (SHARD_SY[shard] - midpoint_y) < 0.0) {
+        candidate_inward_x = -candidate_inward_x;
+        candidate_inward_y = -candidate_inward_y;
+      }
+      double length = sqrt(candidate_inward_x * candidate_inward_x + candidate_inward_y * candidate_inward_y);
+      if (length <= 0.000000001) continue;
+      best_distance_squared = distance_squared;
+      *point_x = candidate_x;
+      *point_y = candidate_y;
+      *inward_x = candidate_inward_x / length;
+      *inward_y = candidate_inward_y / length;
+      found = 1;
+    }
+  }
+  if (found) *distance = sqrt(best_distance_squared);
+  return found;
+}
+
+static void contain_ball(int32_t index) {
+  if (index < 0 || index >= ball_count) return;
+  const double required_distance = BASE_BALL_RADIUS + COLLISION_SEPARATION;
+  for (int32_t iteration = 0; iteration < 8; iteration += 1) {
+    double boundary_x, boundary_y, inward_x, inward_y, distance;
+    if (!nearest_boundary_feature(BALL_X[index], BALL_Y[index], &boundary_x, &boundary_y, &inward_x, &inward_y, &distance)) return;
+    if (point_inside_boundary(BALL_X[index], BALL_Y[index]) && distance >= required_distance) return;
+    BALL_X[index] = boundary_x + inward_x * required_distance;
+    BALL_Y[index] = boundary_y + inward_y * required_distance;
+  }
+}
+
 static int32_t contains_shard(const int32_t *shards, int32_t count, int32_t target) {
   for (int32_t index = 0; index < count; index += 1) {
     if (shards[index] == target) return 1;
@@ -653,7 +739,7 @@ static void initialize_field(double field_seed) {
   for (int32_t index = 0; index < GRID_CELLS; index += 1) GRID[index] = -1;
   for (int32_t gy = GRID_MIN; gy <= GRID_MAX; gy += 1) {
     for (int32_t gx = GRID_MIN; gx <= GRID_MAX; gx += 1) {
-      if (sqrt((double)gx * gx + (double)gy * gy) > 48.0) continue;
+      if (sqrt((double)gx * gx + (double)gy * gy) > FIELD_SITE_RADIUS) continue;
       int32_t shard = shard_count++;
       int32_t grid_slot = grid_index(gx, gy);
       GRID[grid_slot] = shard;
@@ -1229,6 +1315,7 @@ __attribute__((export_name("set_ball_state"))) void set_ball_state(int32_t index
   if (index < 0 || index >= MAX_BALLS) return;
   BALL_X[index] = x; BALL_Y[index] = y; BALL_VX[index] = vx; BALL_VY[index] = vy; BALL_HIT_COOLDOWN[index] = cooldown;
 }
+__attribute__((export_name("contain_ball"))) void contain_ball_state(int32_t index) { contain_ball(index); }
 __attribute__((export_name("set_all_shards_broken"))) void set_all_shards_broken(int32_t broken) {
   for (int32_t index = 0; index < shard_count; index += 1) {
     SHARD_BROKEN[index] = broken ? 1 : 0;

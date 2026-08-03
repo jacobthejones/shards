@@ -20,12 +20,32 @@ const loadRuntime = async () => {
   return instance.exports as Record<string, (...args: number[]) => number>;
 };
 
+const boundaryContainsPoint = (wasm: Record<string, (...args: number[]) => number>, x: number, y: number) => {
+  let inside = false;
+  for (let shard = 0; shard < wasm.get_shard_count(); shard += 1) {
+    const pointCount = wasm.get_shard_point_count(shard);
+    for (let edge = 0; edge < pointCount; edge += 1) {
+      if (!wasm.is_shard_boundary_edge(shard, edge)) continue;
+      const next = (edge + 1) % pointCount;
+      const ax = wasm.get_shard_point_x(shard, edge);
+      const ay = wasm.get_shard_point_y(shard, edge);
+      const bx = wasm.get_shard_point_x(shard, next);
+      const by = wasm.get_shard_point_y(shard, next);
+      if ((ay > y) === (by > y)) continue;
+      const crossingX = ax + (y - ay) * (bx - ax) / (by - ay);
+      if (x < crossingX) inside = !inside;
+    }
+  }
+  return inside;
+};
+
 test("the shipped C++ runtime initializes a contiguous Voronoi field", async () => {
   const wasm = await loadRuntime();
   wasm.initialize_real_simulation(1234, 5678, 1);
 
   const shardCount = wasm.get_shard_count();
   assert.ok(shardCount > 1000);
+  assert.ok(shardCount < 2500, "the field radius should be half of the original field");
   assert.equal(wasm.get_ball_count(), 1);
   assert.ok(wasm.get_shard_point_count(0) >= 3);
   assert.ok(wasm.get_shard_point_count(shardCount - 1) >= 3);
@@ -33,6 +53,26 @@ test("the shipped C++ runtime initializes a contiguous Voronoi field", async () 
   assert.equal(wasm.get_total_hits(), 0);
   assert.equal(wasm.get_total_breaks(), 0);
   assert.equal(wasm.get_simulation_runtime_version(), WASM_RUNTIME_VERSION);
+});
+
+test("initial and added balls spawn inside the reduced field boundary", async () => {
+  const wasm = await loadRuntime();
+  wasm.initialize_real_simulation(1234, 5678, 32);
+  for (let ball = 0; ball < wasm.get_ball_count(); ball += 1) {
+    assert.equal(boundaryContainsPoint(wasm, wasm.get_ball_x(ball), wasm.get_ball_y(ball)), true);
+  }
+
+  wasm.initialize_real_simulation(4321, 8765, 1);
+  wasm.set_score(1_000_000_000_000);
+  for (let purchase = 0; purchase < 31; purchase += 1) assert.equal(wasm.add_ball(), 1);
+  assert.equal(wasm.get_ball_count(), 32);
+  for (let ball = 0; ball < wasm.get_ball_count(); ball += 1) {
+    assert.equal(boundaryContainsPoint(wasm, wasm.get_ball_x(ball), wasm.get_ball_y(ball)), true);
+  }
+
+  wasm.set_ball_state(0, 100, 100, 0, 0, 0);
+  wasm.contain_ball(0);
+  assert.equal(boundaryContainsPoint(wasm, wasm.get_ball_x(0), wasm.get_ball_y(0)), true);
 });
 
 test("the permanent boundary follows every exposed Voronoi edge", async () => {
@@ -143,7 +183,8 @@ test("the permanent boundary contains many balls on a fully cleared field", asyn
   for (let interval = 0; interval < 60; interval += 1) {
     wasm.step_real_simulation(600);
     for (let ball = 0; ball < wasm.get_ball_count(); ball += 1) {
-      assert.ok(Math.hypot(wasm.get_ball_x(ball), wasm.get_ball_y(ball)) < 50);
+      assert.ok(Math.hypot(wasm.get_ball_x(ball), wasm.get_ball_y(ball)) < 26);
+      assert.equal(boundaryContainsPoint(wasm, wasm.get_ball_x(ball), wasm.get_ball_y(ball)), true);
     }
   }
   assert.equal(wasm.get_total_hits(), 0);
@@ -215,7 +256,7 @@ test("The Chosen One purchase and refund use the original ball", async () => {
 test("New Growth requires The Chosen One and refunds its full cost", async () => {
   const wasm = await loadRuntime();
   wasm.initialize_real_simulation(7, 77, 1);
-  wasm.set_score(25_000);
+  wasm.set_score(50_000);
   assert.equal(wasm.set_tech_new_growth(1), 0);
   assert.equal(wasm.get_tech_new_growth(), 0);
 
@@ -226,7 +267,7 @@ test("New Growth requires The Chosen One and refunds its full cost", async () =>
   assert.equal(wasm.set_tech_chosen_one(0), 0);
   assert.equal(wasm.set_tech_new_growth(0), 1);
   assert.equal(wasm.get_tech_new_growth(), 0);
-  assert.equal(wasm.get_score(), 25_000);
+  assert.equal(wasm.get_score(), 50_000);
 });
 
 test("New Growth starts only when the chosen ball sweeps through an empty cell", async () => {
@@ -368,7 +409,7 @@ test("The Chosen One multiplies Resonance and Conduction splash damage", async (
 test("Resonance and Conduction purchase, refund, and propagate damage", async () => {
   const wasm = await loadRuntime();
   wasm.initialize_real_simulation(7, 77, 1);
-  wasm.set_score(25_000);
+  wasm.set_score(50_000);
   assert.equal(wasm.set_tech_conduction(1), 0);
 
   wasm.set_score(10_000);
@@ -395,7 +436,7 @@ test("Resonance and Conduction purchase, refund, and propagate damage", async ()
   wasm.initialize_real_simulation(7, 77, 1);
   wasm.set_score(10_000);
   assert.equal(wasm.set_tech_resonance(1), 1);
-  wasm.set_score(25_000);
+  wasm.set_score(50_000);
   assert.equal(wasm.set_tech_conduction(1), 1);
   assert.equal(wasm.get_tech_conduction(), 1);
   assert.equal(wasm.get_score(), 0);
@@ -413,7 +454,7 @@ test("Resonance and Conduction purchase, refund, and propagate damage", async ()
   const scoreBeforeConductionRefund = wasm.get_score();
   assert.equal(wasm.set_tech_conduction(0), 1);
   assert.equal(wasm.get_tech_conduction(), 0);
-  assert.equal(wasm.get_score(), scoreBeforeConductionRefund + 25_000);
+  assert.equal(wasm.get_score(), scoreBeforeConductionRefund + 50_000);
   const scoreBeforeResonanceRefund = wasm.get_score();
   assert.equal(wasm.set_tech_resonance(0), 1);
   assert.equal(wasm.get_tech_resonance(), 0);

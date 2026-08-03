@@ -130,7 +130,8 @@ test("keeps the prototype self-contained", async () => {
   assert.match(worker, /case "load"/);
   assert.match(worker, /case "setTech"/);
   assert.match(wasmSimulation, /simulation\.wasm\?v=\$\{WASM_RUNTIME_VERSION\}/);
-  assert.match(wasmSimulation, /WASM_RUNTIME_VERSION = 7/);
+  assert.match(wasmSimulation, /WASM_RUNTIME_VERSION = 8/);
+  assert.match(wasmSimulation, /contain_ball/);
   assert.match(wasmSimulation, /is_shard_boundary_edge/);
   assert.match(wasmSimulation, /set_tech_chosen_one/);
   assert.match(wasmSimulation, /set_tech_new_growth/);
@@ -143,9 +144,9 @@ test("keeps the prototype self-contained", async () => {
   assert.match(saveState, /SaveStateVersion\.V1/);
   assert.match(saveState, /unlockedTechs/);
   assert.match(techTree, /RESONANCE_COST = 10_000/);
-  assert.match(techTree, /CONDUCTION_COST = 25_000/);
+  assert.match(techTree, /CONDUCTION_COST = 50_000/);
   assert.match(techTree, /CHOSEN_ONE_COST = 10_000/);
-  assert.match(techTree, /NEW_GROWTH_COST = 25_000/);
+  assert.match(techTree, /NEW_GROWTH_COST = 50_000/);
   assert.match(techTree, /The Chosen One/);
   assert.match(techTree, /Resonance/);
   assert.match(techTree, /Conduction/);

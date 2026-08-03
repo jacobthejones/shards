@@ -10,7 +10,7 @@ import {
 import type { SaveState } from "./save-state";
 import { TECH_IDS, type TechId } from "./tech-tree";
 
-export const WASM_RUNTIME_VERSION = 7;
+export const WASM_RUNTIME_VERSION = 8;
 
 type WasmExports = {
   initialize_real_simulation: (seed: number, fieldSeed: number, balls: number) => void;
@@ -33,6 +33,7 @@ type WasmExports = {
   set_random_state: (state: number) => void;
   set_next_impact_id: (id: number) => void;
   set_ball_state: (index: number, x: number, y: number, vx: number, vy: number, cooldown: number) => void;
+  contain_ball: (index: number) => void;
   set_all_shards_broken: (broken: number) => void;
   set_shard_broken: (shard: number, broken: number) => void;
   set_shard_growth: (shard: number, growth: number, growing: number) => void;
@@ -304,6 +305,7 @@ export class WasmSimulation {
     save.arrows.forEach((arrow, index) => {
       this.arrowMeta[index] = { id: arrow.id, hue: arrow.hue };
       this.wasm.set_ball_state(index, arrow.x, arrow.y, arrow.vx, arrow.vy, arrow.hitCooldown);
+      this.wasm.contain_ball(index);
     });
     save.shards.forEach((savedShard) => {
       const index = this.shardIndexByKey.get(savedShard.key);
