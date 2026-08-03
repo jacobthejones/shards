@@ -186,8 +186,8 @@ test("keeps the growth prototype isolated from the live shard route", async () =
   assert.match(page, /growth tech tree/);
   assert.match(page, /Fifteen calm balls regrowing green shards/);
   assert.match(engine, /finaleRemaining: 1/);
-  assert.match(engine, /GROWTH_RATE = 0\.01/);
-  assert.match(engine, /growthPending/);
+  assert.match(engine, /GROWTH_DECAY_RATE = 0\.01/);
+  assert.match(engine, /GROWTH_HEALTH_PER_EXIT = 0\.5/);
   assert.match(engine, /shard\.tangible/);
   assert.match(engine, /bounceOffTangibleShards/);
   assert.match(techTree, /A shard that reaches fullness/);

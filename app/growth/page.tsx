@@ -100,7 +100,7 @@ const drawShard = (context: CanvasRenderingContext2D, shard: GrowthShard, finale
     return;
   }
 
-  if (shard.growing) {
+  if (shard.growth > 0) {
     context.strokeStyle = `hsla(147, 58%, 70%, ${0.18 + shard.growth * 0.64})`;
     context.lineWidth = 0.015;
     context.stroke();
@@ -358,7 +358,7 @@ export default function GrowthPage() {
       </header>
 
       <div style={{ position: "absolute", zIndex: 2, top: 100, left: 32, ...labelStyle, pointerEvents: "none" }}>
-        {mode === "finale" ? "A normal run is one second from its final break" : "A shard begins growing when a ball leaves it · 1% per second"}
+        {mode === "finale" ? "A normal run is one second from its final break" : "Each clear exit adds 50% health · incomplete growth fades at 1% per second"}
       </div>
 
       <div style={{ position: "absolute", zIndex: 2, right: 32, bottom: 28, display: "flex", alignItems: "center", gap: 18, pointerEvents: "auto" }}>
@@ -374,7 +374,7 @@ export default function GrowthPage() {
       </div>
 
       <div style={{ position: "absolute", zIndex: 2, bottom: 28, left: 32, ...labelStyle, pointerEvents: "none" }}>
-        <span style={{ color: "rgba(155, 217, 169, 0.72)" }}>GREEN</span> borders begin after a ball leaves · completed shards become solid
+        <span style={{ color: "rgba(155, 217, 169, 0.72)" }}>GREEN</span> borders gain 50% when the last ball leaves · completed shards become solid
       </div>
 
       {techTreeOpen && mode === "growth" && (

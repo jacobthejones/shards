@@ -2,7 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
-  GROWTH_RATE,
+  GROWTH_DECAY_RATE,
+  GROWTH_HEALTH_PER_EXIT,
   createGrowthState,
   enterGrowthMode,
   stepGrowthState,
@@ -75,7 +76,7 @@ test("the jagged boundary does not pull interior balls to a corner", () => {
   assert.ok(Math.hypot(ball.x, ball.y) < 2);
 });
 
-test("a shard starts growing only after the ball leaves it", () => {
+test("a shard gains half health only after the ball leaves it", () => {
   const state = createGrowthState();
   enterGrowthMode(state);
   const shard = state.shards.get(state.finalShardKey);
@@ -96,22 +97,20 @@ test("a shard starts growing only after the ball leaves it", () => {
   stepGrowthState(state, 0.05);
 
   assert.equal(shard.growth, 0);
-  assert.equal(shard.growing, false);
-  assert.equal(shard.growthPending, true);
+  assert.equal(shard.tangible, false);
 
   for (let index = 0; index < 20; index += 1) stepGrowthState(state, 0.05);
 
-  assert.equal(shard.growing, true);
-  assert.ok(shard.growth >= 0.5);
+  assert.equal(shard.tangible, false);
+  assert.ok(shard.growth > GROWTH_HEALTH_PER_EXIT - 0.01);
 });
 
-test("growing shards advance at one percent per second", () => {
+test("incomplete growth decays at one percent per second", () => {
   const state = createGrowthState();
   enterGrowthMode(state);
   const shard = state.shards.get(state.finalShardKey);
   assert.ok(shard);
   shard.growth = 0.5;
-  shard.growing = true;
   state.balls.forEach((ball) => {
     ball.x = 0;
     ball.y = 7;
@@ -121,16 +120,15 @@ test("growing shards advance at one percent per second", () => {
 
   for (let index = 0; index < 20; index += 1) stepGrowthState(state, 0.05);
 
-  assert.ok(Math.abs(shard.growth - (0.5 + GROWTH_RATE)) < 0.000001);
+  assert.ok(Math.abs(shard.growth - (0.5 - GROWTH_DECAY_RATE)) < 0.000001);
 });
 
-test("a growing shard becomes tangible at full growth", () => {
+test("an exit that takes health over one makes the shard tangible", () => {
   const state = createGrowthState();
   enterGrowthMode(state);
   const shard = state.shards.get(state.finalShardKey);
   assert.ok(shard);
-  shard.growth = 0.99;
-  shard.growing = true;
+  shard.growth = 0.6;
   state.balls.forEach((ball) => {
     ball.x = 0;
     ball.y = 7;
@@ -138,36 +136,43 @@ test("a growing shard becomes tangible at full growth", () => {
     ball.vy = 0;
   });
 
-  for (let index = 0; index < 21; index += 1) stepGrowthState(state, 0.05);
+  const ball = state.balls[0];
+  ball.x = shard.sx;
+  ball.y = shard.sy;
+  ball.vx = 1.4;
+  ball.vy = 0;
+  for (let index = 0; index < 20; index += 1) stepGrowthState(state, 0.05);
 
-  assert.equal(shard.growth, 0);
-  assert.equal(shard.growing, false);
+  assert.equal(shard.growth, 1);
   assert.equal(shard.tangible, true);
   assert.equal(state.growthCompletions, 1);
 });
 
-test("a ball passing through a growing shard does not reset it", () => {
+test("a ball leaving while another remains does not add growth", () => {
   const state = createGrowthState();
   enterGrowthMode(state);
   const shard = state.shards.get(state.finalShardKey);
   assert.ok(shard);
-  shard.growth = 0.5;
-  shard.growing = true;
+  const leavingBall = state.balls[0];
+  const remainingBall = state.balls[1];
 
-  state.balls.forEach((ball) => {
+  state.balls.slice(2).forEach((ball) => {
     ball.x = 0;
     ball.y = 7;
     ball.vx = 0;
     ball.vy = 0;
   });
-  const ball = state.balls[0];
-  ball.x = shard.sx - 1;
-  ball.y = shard.sy;
-  ball.vx = 1.4;
-  ball.vy = 0;
+  leavingBall.x = shard.sx;
+  leavingBall.y = shard.sy;
+  leavingBall.vx = 1.4;
+  leavingBall.vy = 0;
+  remainingBall.x = shard.sx;
+  remainingBall.y = shard.sy;
+  remainingBall.vx = 0;
+  remainingBall.vy = 0;
 
-  for (let index = 0; index < 30; index += 1) stepGrowthState(state, 0.05);
+  for (let index = 0; index < 20; index += 1) stepGrowthState(state, 0.05);
 
-  assert.equal(shard.growing, true);
-  assert.ok(shard.growth > 0.5);
+  assert.equal(shard.growth, 0);
+  assert.equal(shard.tangible, false);
 });

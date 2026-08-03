@@ -21,7 +21,6 @@ export type GrowthBall = {
 
 export type GrowthShard = Shard & {
   growth: number;
-  growthPending: boolean;
   tangible: boolean;
 };
 
@@ -43,7 +42,8 @@ export type GrowthState = {
   nextCompletionAt: number;
 };
 
-export const GROWTH_RATE = 0.01;
+export const GROWTH_DECAY_RATE = 0.01;
+export const GROWTH_HEALTH_PER_EXIT = 0.5;
 export const GROWTH_FIELD_RADIUS = 7.4;
 export const BALL_SPEED = INITIAL_BALL_SPEED;
 export const BALL_RADIUS = BASE_BALL_RADIUS;
@@ -135,7 +135,6 @@ const makeShards = (fieldSeed: number): Map<string, GrowthShard> => {
         maxHealth: 1,
         healthUpdatedAt: 0,
         growth: 0,
-        growthPending: false,
         growing: false,
         tangible: false,
         boundaryEdges: [],
@@ -187,7 +186,6 @@ const fieldFromStaticShards = (staticShards: StaticShardState[]) => {
     maxHealth: 1,
     healthUpdatedAt: 0,
     growth: 0,
-    growthPending: false,
     growing: false,
     tangible: false,
     impacts: [],
@@ -388,11 +386,15 @@ const circleOverlapsShard = (x: number, y: number, shard: GrowthShard) => {
   return nearestEdge(shard, x, y).distance <= BALL_RADIUS;
 };
 
-const beginGrowth = (shard: GrowthShard) => {
-  if (shard.tangible || shard.growing) return;
-  shard.growth = 0.5;
-  shard.growing = true;
-  shard.growthPending = false;
+const addGrowthHealth = (state: GrowthState, shard: GrowthShard) => {
+  if (shard.tangible) return;
+  shard.growth += GROWTH_HEALTH_PER_EXIT;
+  if (shard.growth < 1) return;
+  shard.growth = 1;
+  shard.growing = false;
+  shard.tangible = true;
+  state.growthCompletions += 1;
+  state.nextCompletionAt = state.time;
 };
 
 type BallPath = {
@@ -407,36 +409,29 @@ const processGrowthPaths = (
   paths: BallPath[],
 ) => {
   state.shards.forEach((shard) => {
-    if (shard.tangible || shard.growing) return;
-    const pathIntersects = paths.some((path) => segmentIntersectsPolygon(
-      path.startX,
-      path.startY,
-      path.endX,
-      path.endY,
-      shard.points,
-    ));
-    const endpointOverlaps = paths.some((path) => circleOverlapsShard(path.endX, path.endY, shard));
-    if (shard.growthPending) {
-      if (!endpointOverlaps) beginGrowth(shard);
-      return;
-    }
-    if (!pathIntersects) return;
-    if (endpointOverlaps) shard.growthPending = true;
-    else beginGrowth(shard);
+    if (shard.tangible) return;
+    paths.forEach((path) => {
+      const pathIntersects = segmentIntersectsPolygon(
+        path.startX,
+        path.startY,
+        path.endX,
+        path.endY,
+        shard.points,
+      );
+      const endsInside = circleOverlapsShard(path.endX, path.endY, shard);
+      if (!pathIntersects || endsInside) return;
+      const anotherBallRemains = paths.some((otherPath) => (
+        otherPath !== path && circleOverlapsShard(otherPath.endX, otherPath.endY, shard)
+      ));
+      if (!anotherBallRemains) addGrowthHealth(state, shard);
+    });
   });
 };
 
-const refreshGrowth = (state: GrowthState, delta: number) => {
+const decayGrowth = (state: GrowthState, delta: number) => {
   state.shards.forEach((shard) => {
-    if (!shard.growing) return;
-    shard.growth = Math.min(1, shard.growth + GROWTH_RATE * delta);
-    if (shard.growth < 1) return;
-    shard.growth = 0;
-    shard.growing = false;
-    shard.growthPending = false;
-    shard.tangible = true;
-    state.growthCompletions += 1;
-    state.nextCompletionAt = state.time;
+    if (shard.tangible || shard.growth <= 0) return;
+    shard.growth = Math.max(0, shard.growth - GROWTH_DECAY_RATE * delta);
   });
 };
 
@@ -446,14 +441,12 @@ export const enterGrowthMode = (state: GrowthState) => {
   const finalShard = state.shards.get(state.finalShardKey);
   if (finalShard) {
     finalShard.growth = 0;
-    finalShard.growthPending = false;
     finalShard.health = 1;
     finalShard.growing = false;
     finalShard.tangible = false;
   }
   state.shards.forEach((shard) => {
     shard.growth = 0;
-    shard.growthPending = false;
     shard.health = 1;
     shard.growing = false;
     shard.tangible = false;
@@ -481,6 +474,6 @@ export const stepGrowthState = (state: GrowthState, elapsedSeconds: number) => {
     if (state.finaleRemaining === 0) enterGrowthMode(state);
     return;
   }
+  decayGrowth(state, delta);
   processGrowthPaths(state, paths);
-  refreshGrowth(state, delta);
 };
