@@ -9,9 +9,12 @@
 #define GRID_CELLS (GRID_SIZE * GRID_SIZE)
 #define MAX_SHARDS 10000
 #define MAX_CELL_POINTS 64
-#define FIELD_SITE_SELECTION_RADIUS 27.0
-#define FIELD_BOUNDARY_POINT_COUNT 32
-#define FIELD_BOUNDARY_RADIUS 24.0
+#define FIELD_SITE_SELECTION_RADIUS 23.0
+#define FIELD_SITE_GENERATION_RADIUS 34.0
+#define FIELD_CLIP_BOUNDARY_POINT_COUNT 64
+#define FIELD_CLIP_BOUNDARY_RADIUS 40.0
+#define MAX_FIELD_BOUNDARY_POINTS 2048
+#define MAX_FIELD_LAYOUT_ATTEMPTS 48
 #define MAX_IMPACTS 64
 #define MAX_BALLS 256
 #define MAX_EVENTS_PER_STEP 1024
@@ -60,8 +63,12 @@ extern double ceil(double);
 static double POINT_X[MAX_SHARDS * MAX_CELL_POINTS];
 static double POINT_Y[MAX_SHARDS * MAX_CELL_POINTS];
 static int32_t POINT_COUNT[MAX_SHARDS];
-static double FIELD_BOUNDARY_X[FIELD_BOUNDARY_POINT_COUNT];
-static double FIELD_BOUNDARY_Y[FIELD_BOUNDARY_POINT_COUNT];
+static double FIELD_BOUNDARY_X[MAX_FIELD_BOUNDARY_POINTS];
+static double FIELD_BOUNDARY_Y[MAX_FIELD_BOUNDARY_POINTS];
+static int32_t field_boundary_point_count;
+static double FIELD_CLIP_BOUNDARY_X[FIELD_CLIP_BOUNDARY_POINT_COUNT];
+static double FIELD_CLIP_BOUNDARY_Y[FIELD_CLIP_BOUNDARY_POINT_COUNT];
+static int32_t FIELD_SITE_SELECTED[GRID_CELLS];
 static double CENTER_X[MAX_SHARDS];
 static double CENTER_Y[MAX_SHARDS];
 static int32_t GRID[GRID_CELLS];
@@ -78,6 +85,9 @@ static double SHARD_HUE[MAX_SHARDS];
 static double SHARD_SEED[MAX_SHARDS];
 static int32_t SHARD_BROKEN[MAX_SHARDS];
 static int32_t SHARD_BOUNDARY_EDGE[MAX_SHARDS * MAX_CELL_POINTS];
+static int32_t SHARD_HAS_BOUNDARY_EDGE[MAX_SHARDS];
+static int32_t BOUNDARY_EDGE_SHARD[MAX_FIELD_BOUNDARY_POINTS];
+static int32_t BOUNDARY_EDGE_INDEX[MAX_FIELD_BOUNDARY_POINTS];
 static int32_t SHARD_IMPACT_COUNT[MAX_SHARDS];
 static double SHARD_IMPACT_STRENGTH[MAX_SHARDS * MAX_IMPACTS];
 static double SHARD_IMPACT_X[MAX_SHARDS * MAX_IMPACTS];
@@ -120,6 +130,7 @@ static int32_t corrosive_wake_unlocked;
 static int32_t new_growth_unlocked;
 static int32_t resonance_unlocked;
 static int32_t conduction_unlocked;
+static int32_t field_layout_variant;
 static int32_t event_count;
 static int32_t event_type[MAX_EVENTS_PER_STEP];
 static int32_t event_shard[MAX_EVENTS_PER_STEP];
@@ -132,8 +143,6 @@ static double last_checksum;
 
 static const double HEXAGON_X[6] = {1.0, 0.5, -0.5, -1.0, -0.5, 0.5};
 static const double HEXAGON_Y[6] = {0.0, 0.8660254037844386, 0.8660254037844386, 0.0, -0.8660254037844386, -0.8660254037844386};
-
-static int32_t abs_i32(int32_t value) { return value < 0 ? -value : value; }
 
 static int32_t grid_index(int32_t gx, int32_t gy) {
   return (gy - GRID_MIN) * GRID_SIZE + (gx - GRID_MIN);
@@ -153,16 +162,21 @@ static double seeded_hash(double gx, double gy, double field_seed) {
 }
 
 static int32_t field_site_included(int32_t gx, int32_t gy) {
-  return sqrt((double)gx * gx + (double)gy * gy) <= FIELD_SITE_SELECTION_RADIUS;
+  return sqrt((double)gx * gx + (double)gy * gy) <= FIELD_SITE_SELECTION_RADIUS
+    && FIELD_SITE_SELECTED[grid_index(gx, gy)];
 }
 
-static void build_field_boundary(double field_seed) {
-  for (int32_t index = 0; index < FIELD_BOUNDARY_POINT_COUNT; index += 1) {
-    double angle = TAU * (double)index / (double)FIELD_BOUNDARY_POINT_COUNT;
-    double radius = FIELD_BOUNDARY_RADIUS
+static int32_t field_site_available(int32_t gx, int32_t gy) {
+  return sqrt((double)gx * gx + (double)gy * gy) <= FIELD_SITE_GENERATION_RADIUS;
+}
+
+static void build_field_clip_boundary(double field_seed) {
+  for (int32_t index = 0; index < FIELD_CLIP_BOUNDARY_POINT_COUNT; index += 1) {
+    double angle = TAU * (double)index / (double)FIELD_CLIP_BOUNDARY_POINT_COUNT;
+    double radius = FIELD_CLIP_BOUNDARY_RADIUS
       + (seeded_hash((double)index + 90.1, (double)index - 33.2, field_seed) * 2.0 - 1.0) * 0.18;
-    FIELD_BOUNDARY_X[index] = cos(angle) * radius;
-    FIELD_BOUNDARY_Y[index] = sin(angle) * radius;
+    FIELD_CLIP_BOUNDARY_X[index] = cos(angle) * radius;
+    FIELD_CLIP_BOUNDARY_Y[index] = sin(angle) * radius;
   }
 }
 
@@ -177,10 +191,14 @@ static void site_for(int32_t gx, int32_t gy, double field_seed, double *x, doubl
     *y = 0.0;
     return;
   }
-  double angle = seeded_hash((double)gx + 18.4, (double)gy - 7.1, field_seed) * TAU;
-  double radius = sqrt(seeded_hash((double)gx - 4.2, (double)gy + 21.8, field_seed)) * 0.78;
-  *x = gx * CELL_SIZE + cos(angle) * radius + sin(gx * 0.71 + gy * 1.17) * 0.075;
-  *y = gy * CELL_SIZE + sin(angle) * radius + cos(gx * 1.09 - gy * 0.53) * 0.075;
+  double layout_seed = field_seed + (double)field_layout_variant * 971.37;
+  double angle = seeded_hash((double)gx + 18.4, (double)gy - 7.1, layout_seed) * TAU;
+  double grid_radius = sqrt((double)gx * gx + (double)gy * gy);
+  double displacement_scale = grid_radius > FIELD_SITE_SELECTION_RADIUS - 3.0 ? 0.30 : 0.78;
+  double radius = sqrt(seeded_hash((double)gx - 4.2, (double)gy + 21.8, layout_seed)) * displacement_scale;
+  double organic_scale = grid_radius > FIELD_SITE_SELECTION_RADIUS - 3.0 ? 0.03 : 0.075;
+  *x = gx * CELL_SIZE + cos(angle) * radius + sin(gx * 0.71 + gy * 1.17) * organic_scale;
+  *y = gy * CELL_SIZE + sin(angle) * radius + cos(gx * 1.09 - gy * 0.53) * organic_scale;
 }
 
 static int32_t clip_polygon(
@@ -225,16 +243,16 @@ static int32_t build_cell(int32_t gx, int32_t gy, double field_seed, double *sx,
   double polygon_y[MAX_CELL_POINTS];
   double clipped_x[MAX_CELL_POINTS];
   double clipped_y[MAX_CELL_POINTS];
-  int32_t polygon_count = FIELD_BOUNDARY_POINT_COUNT;
+  int32_t polygon_count = FIELD_CLIP_BOUNDARY_POINT_COUNT;
   for (int32_t index = 0; index < polygon_count; index += 1) {
-    polygon_x[index] = FIELD_BOUNDARY_X[index];
-    polygon_y[index] = FIELD_BOUNDARY_Y[index];
+    polygon_x[index] = FIELD_CLIP_BOUNDARY_X[index];
+    polygon_y[index] = FIELD_CLIP_BOUNDARY_Y[index];
   }
 
   for (int32_t neighbor_y = gy - 4; neighbor_y <= gy + 4; neighbor_y += 1) {
     for (int32_t neighbor_x = gx - 4; neighbor_x <= gx + 4; neighbor_x += 1) {
       if (neighbor_x == gx && neighbor_y == gy) continue;
-      if (!field_site_included(neighbor_x, neighbor_y)) continue;
+      if (!field_site_available(neighbor_x, neighbor_y)) continue;
       double nx, ny;
       site_for(neighbor_x, neighbor_y, field_seed, &nx, &ny);
       double a = nx - *sx;
@@ -555,35 +573,6 @@ static int points_close(double ax, double ay, double bx, double by) {
   return dx * dx + dy * dy <= 0.00000025;
 }
 
-static int32_t point_on_field_segment(double x, double y, double ax, double ay, double bx, double by) {
-  double edge_x = bx - ax;
-  double edge_y = by - ay;
-  double length_squared = edge_x * edge_x + edge_y * edge_y;
-  if (length_squared <= 0.000000000001) return 0;
-  double cross = (x - ax) * edge_y - (y - ay) * edge_x;
-  double tolerance = 0.001;
-  if (cross * cross > tolerance * tolerance * length_squared) return 0;
-  double projection = (x - ax) * edge_x + (y - ay) * edge_y;
-  return projection >= -tolerance && projection <= length_squared + tolerance;
-}
-
-static int32_t edge_lies_on_field_boundary(int32_t shard, int32_t edge_index) {
-  int32_t start = shard * MAX_CELL_POINTS;
-  int32_t next = (edge_index + 1) % POINT_COUNT[shard];
-  double ax = POINT_X[start + edge_index];
-  double ay = POINT_Y[start + edge_index];
-  double bx = POINT_X[start + next];
-  double by = POINT_Y[start + next];
-  for (int32_t boundary = 0; boundary < FIELD_BOUNDARY_POINT_COUNT; boundary += 1) {
-    int32_t boundary_next = (boundary + 1) % FIELD_BOUNDARY_POINT_COUNT;
-    if (point_on_field_segment(ax, ay, FIELD_BOUNDARY_X[boundary], FIELD_BOUNDARY_Y[boundary], FIELD_BOUNDARY_X[boundary_next], FIELD_BOUNDARY_Y[boundary_next])
-      && point_on_field_segment(bx, by, FIELD_BOUNDARY_X[boundary], FIELD_BOUNDARY_Y[boundary], FIELD_BOUNDARY_X[boundary_next], FIELD_BOUNDARY_Y[boundary_next])) {
-      return 1;
-    }
-  }
-  return 0;
-}
-
 static int shared_edge_for_shards(
   int32_t first,
   int32_t second,
@@ -636,10 +625,48 @@ static int shared_edge_for_shards(
   return 0;
 }
 
+static int32_t edge_matches(
+  int32_t first,
+  int32_t first_edge,
+  int32_t second,
+  int32_t second_edge
+) {
+  int32_t first_start = first * MAX_CELL_POINTS;
+  int32_t second_start = second * MAX_CELL_POINTS;
+  int32_t first_next = (first_edge + 1) % POINT_COUNT[first];
+  int32_t second_next = (second_edge + 1) % POINT_COUNT[second];
+  double first_ax = POINT_X[first_start + first_edge];
+  double first_ay = POINT_Y[first_start + first_edge];
+  double first_bx = POINT_X[first_start + first_next];
+  double first_by = POINT_Y[first_start + first_next];
+  double second_ax = POINT_X[second_start + second_edge];
+  double second_ay = POINT_Y[second_start + second_edge];
+  double second_bx = POINT_X[second_start + second_next];
+  double second_by = POINT_Y[second_start + second_next];
+  return (points_close(first_ax, first_ay, second_ax, second_ay)
+    && points_close(first_bx, first_by, second_bx, second_by))
+    || (points_close(first_ax, first_ay, second_bx, second_by)
+      && points_close(first_bx, first_by, second_ax, second_ay));
+}
+
+static int32_t edge_shared_by_selected_shard(int32_t shard, int32_t edge) {
+  for (int32_t gy = SHARD_GY[shard] - 4; gy <= SHARD_GY[shard] + 4; gy += 1) {
+    for (int32_t gx = SHARD_GX[shard] - 4; gx <= SHARD_GX[shard] + 4; gx += 1) {
+      if (!in_grid(gx, gy)) continue;
+      int32_t neighbor = GRID[grid_index(gx, gy)];
+      if (neighbor < 0 || neighbor == shard) continue;
+      for (int32_t neighbor_edge = 0; neighbor_edge < POINT_COUNT[neighbor]; neighbor_edge += 1) {
+        if (edge_matches(shard, edge, neighbor, neighbor_edge)) return 1;
+      }
+    }
+  }
+  return 0;
+}
+
 static int32_t point_inside_boundary(double x, double y) {
   int32_t inside = 0;
-  for (int32_t edge = 0; edge < FIELD_BOUNDARY_POINT_COUNT; edge += 1) {
-    int32_t next = (edge + 1) % FIELD_BOUNDARY_POINT_COUNT;
+  for (int32_t edge = 0; edge < field_boundary_point_count; edge += 1) {
+    int32_t next = (edge + 1) % field_boundary_point_count;
     double ax = FIELD_BOUNDARY_X[edge];
     double ay = FIELD_BOUNDARY_Y[edge];
     double bx = FIELD_BOUNDARY_X[next];
@@ -662,8 +689,8 @@ static int32_t nearest_boundary_feature(
 ) {
   double best_distance_squared = 1.7976931348623157e+308;
   int32_t found = 0;
-  for (int32_t edge = 0; edge < FIELD_BOUNDARY_POINT_COUNT; edge += 1) {
-    int32_t next = (edge + 1) % FIELD_BOUNDARY_POINT_COUNT;
+  for (int32_t edge = 0; edge < field_boundary_point_count; edge += 1) {
+    int32_t next = (edge + 1) % field_boundary_point_count;
     double ax = FIELD_BOUNDARY_X[edge];
     double ay = FIELD_BOUNDARY_Y[edge];
     double bx = FIELD_BOUNDARY_X[next];
@@ -696,6 +723,137 @@ static int32_t nearest_boundary_feature(
   }
   if (found) *distance = sqrt(best_distance_squared);
   return found;
+}
+
+static void field_edge_points(int32_t shard, int32_t edge, double *ax, double *ay, double *bx, double *by) {
+  int32_t start = shard * MAX_CELL_POINTS;
+  int32_t next = (edge + 1) % POINT_COUNT[shard];
+  *ax = POINT_X[start + edge];
+  *ay = POINT_Y[start + edge];
+  *bx = POINT_X[start + next];
+  *by = POINT_Y[start + next];
+}
+
+static int32_t build_generated_field_boundary(void) {
+  int32_t edge_count = 0;
+  for (int32_t shard = 0; shard < shard_count; shard += 1) {
+    for (int32_t edge = 0; edge < POINT_COUNT[shard]; edge += 1) {
+      if (!SHARD_BOUNDARY_EDGE[shard * MAX_CELL_POINTS + edge]) continue;
+      if (edge_count >= MAX_FIELD_BOUNDARY_POINTS) return 0;
+      BOUNDARY_EDGE_SHARD[edge_count] = shard;
+      BOUNDARY_EDGE_INDEX[edge_count] = edge;
+      edge_count += 1;
+    }
+  }
+  if (edge_count < 3) return 0;
+
+  int32_t used[MAX_FIELD_BOUNDARY_POINTS];
+  for (int32_t index = 0; index < edge_count; index += 1) used[index] = 0;
+  int32_t current = 0;
+  double start_x, start_y, current_x, current_y;
+  field_edge_points(BOUNDARY_EDGE_SHARD[current], BOUNDARY_EDGE_INDEX[current], &start_x, &start_y, &current_x, &current_y);
+  field_boundary_point_count = 0;
+
+  for (int32_t step = 0; step < edge_count; step += 1) {
+    if (field_boundary_point_count >= MAX_FIELD_BOUNDARY_POINTS) return 0;
+    double edge_ax, edge_ay, edge_bx, edge_by;
+    field_edge_points(BOUNDARY_EDGE_SHARD[current], BOUNDARY_EDGE_INDEX[current], &edge_ax, &edge_ay, &edge_bx, &edge_by);
+    if (!points_close(edge_ax, edge_ay, start_x, start_y) && step == 0) return 0;
+    FIELD_BOUNDARY_X[field_boundary_point_count] = edge_ax;
+    FIELD_BOUNDARY_Y[field_boundary_point_count] = edge_ay;
+    field_boundary_point_count += 1;
+    used[current] = 1;
+    current_x = edge_bx;
+    current_y = edge_by;
+    if (points_close(current_x, current_y, start_x, start_y)) {
+      if (step + 1 != edge_count) return 0;
+      return 1;
+    }
+
+    int32_t next_edge = -1;
+    for (int32_t candidate = 0; candidate < edge_count; candidate += 1) {
+      if (used[candidate]) continue;
+      double candidate_ax, candidate_ay, candidate_bx, candidate_by;
+      field_edge_points(BOUNDARY_EDGE_SHARD[candidate], BOUNDARY_EDGE_INDEX[candidate], &candidate_ax, &candidate_ay, &candidate_bx, &candidate_by);
+      if (points_close(candidate_ax, candidate_ay, current_x, current_y)) {
+        next_edge = candidate;
+        break;
+      }
+    }
+    if (next_edge < 0) return 0;
+    current = next_edge;
+  }
+  return 0;
+}
+
+static int32_t boundary_edge_inward_normal(
+  int32_t shard,
+  int32_t edge,
+  double *midpoint_x,
+  double *midpoint_y,
+  double *inward_x,
+  double *inward_y
+) {
+  double ax, ay, bx, by;
+  field_edge_points(shard, edge, &ax, &ay, &bx, &by);
+  double edge_x = bx - ax;
+  double edge_y = by - ay;
+  double candidate_x = -edge_y;
+  double candidate_y = edge_x;
+  *midpoint_x = (ax + bx) / 2.0;
+  *midpoint_y = (ay + by) / 2.0;
+  if (candidate_x * (-*midpoint_x) + candidate_y * (-*midpoint_y) < 0.0) {
+    candidate_x = -candidate_x;
+    candidate_y = -candidate_y;
+  }
+  double length = sqrt(candidate_x * candidate_x + candidate_y * candidate_y);
+  if (length <= 0.000000001) return 0;
+  *inward_x = candidate_x / length;
+  *inward_y = candidate_y / length;
+  return 1;
+}
+
+static int32_t boundary_shard_is_reachable(int32_t shard) {
+  for (int32_t edge = 0; edge < POINT_COUNT[shard]; edge += 1) {
+    if (SHARD_BOUNDARY_EDGE[shard * MAX_CELL_POINTS + edge]) continue;
+    double midpoint_x, midpoint_y, inward_x, inward_y;
+    if (!boundary_edge_inward_normal(shard, edge, &midpoint_x, &midpoint_y, &inward_x, &inward_y)) continue;
+    double ax, ay, bx, by;
+    field_edge_points(shard, edge, &ax, &ay, &bx, &by);
+    for (int32_t sample = 1; sample <= 9; sample += 1) {
+      double ratio = (double)sample / 10.0;
+      double edge_x = ax + (bx - ax) * ratio;
+      double edge_y = ay + (by - ay) * ratio;
+      double ball_x = edge_x + inward_x * (BASE_BALL_RADIUS + COLLISION_SEPARATION + 0.006);
+      double ball_y = edge_y + inward_y * (BASE_BALL_RADIUS + COLLISION_SEPARATION + 0.006);
+      if (!point_inside_boundary(ball_x, ball_y)) continue;
+      int32_t blocked = 0;
+      for (int32_t gy = SHARD_GY[shard] - 3; gy <= SHARD_GY[shard] + 3 && !blocked; gy += 1) {
+        for (int32_t gx = SHARD_GX[shard] - 3; gx <= SHARD_GX[shard] + 3; gx += 1) {
+          if (!in_grid(gx, gy)) continue;
+          int32_t other = GRID[grid_index(gx, gy)];
+          if (other < 0 || other == shard || !SHARD_HAS_BOUNDARY_EDGE[other]) continue;
+          if (circle_intersects_polygon(ball_x, ball_y, BASE_BALL_RADIUS, other)) {
+            blocked = 1;
+            break;
+          }
+        }
+      }
+      if (!blocked) return 1;
+    }
+  }
+  return 0;
+}
+
+static int32_t count_reachable_boundary_shards(void) {
+  int32_t boundary_shards = 0;
+  int32_t reachable_shards = 0;
+  for (int32_t shard = 0; shard < shard_count; shard += 1) {
+    if (!SHARD_HAS_BOUNDARY_EDGE[shard]) continue;
+    boundary_shards += 1;
+    if (boundary_shard_is_reachable(shard)) reachable_shards += 1;
+  }
+  return boundary_shards == reachable_shards ? boundary_shards : -reachable_shards;
 }
 
 static void contain_ball(int32_t index) {
@@ -804,12 +962,12 @@ static void apply_resonance(int32_t source, int32_t ball) {
   }
 }
 
-static void initialize_field(double field_seed) {
+static int32_t build_field_geometry(double field_seed) {
   shard_count = 0;
-  current_field_seed = field_seed;
   damaged_shard_count = 0;
+  field_boundary_point_count = 0;
   for (int32_t index = 0; index < GRID_CELLS; index += 1) GRID[index] = -1;
-  build_field_boundary(field_seed);
+  build_field_clip_boundary(field_seed);
   for (int32_t gy = GRID_MIN; gy <= GRID_MAX; gy += 1) {
     for (int32_t gx = GRID_MIN; gx <= GRID_MAX; gx += 1) {
       if (!field_site_included(gx, gy)) continue;
@@ -845,14 +1003,63 @@ static void initialize_field(double field_seed) {
       SHARD_BROKEN[shard] = circle_intersects_polygon(0.0, 0.0, BASE_BALL_RADIUS, shard);
       SHARD_IMPACT_COUNT[shard] = 0;
       SHARD_DAMAGED[shard] = 0;
+      SHARD_HAS_BOUNDARY_EDGE[shard] = 0;
     }
   }
   for (int32_t shard = 0; shard < shard_count; shard += 1) {
     int32_t edge_start = shard * MAX_CELL_POINTS;
     for (int32_t edge = 0; edge < POINT_COUNT[shard]; edge += 1) {
-      SHARD_BOUNDARY_EDGE[edge_start + edge] = edge_lies_on_field_boundary(shard, edge);
+      SHARD_BOUNDARY_EDGE[edge_start + edge] = edge_shared_by_selected_shard(shard, edge) ? 0 : 1;
+      if (SHARD_BOUNDARY_EDGE[edge_start + edge]) SHARD_HAS_BOUNDARY_EDGE[shard] = 1;
     }
   }
+  return build_generated_field_boundary();
+}
+
+static int32_t remove_inaccessible_boundary_sites(void) {
+  // A boundary shard hidden behind other boundary shards is a protrusion from
+  // the circular site field. Remove that outer site and rebuild the ring so
+  // the remaining perimeter is a single reachable layer of full cells.
+  int32_t removed = 0;
+  for (int32_t shard = 0; shard < shard_count; shard += 1) {
+    if (!SHARD_HAS_BOUNDARY_EDGE[shard] || boundary_shard_is_reachable(shard)) continue;
+    int32_t slot = grid_index(SHARD_GX[shard], SHARD_GY[shard]);
+    if (!FIELD_SITE_SELECTED[slot]) continue;
+    FIELD_SITE_SELECTED[slot] = 0;
+    removed += 1;
+  }
+  return removed;
+}
+
+static int32_t initialize_field_candidate(double field_seed) {
+  for (int32_t index = 0; index < GRID_CELLS; index += 1) FIELD_SITE_SELECTED[index] = 0;
+  for (int32_t gy = GRID_MIN; gy <= GRID_MAX; gy += 1) {
+    for (int32_t gx = GRID_MIN; gx <= GRID_MAX; gx += 1) {
+      if (sqrt((double)gx * gx + (double)gy * gy) <= FIELD_SITE_SELECTION_RADIUS) {
+        FIELD_SITE_SELECTED[grid_index(gx, gy)] = 1;
+      }
+    }
+  }
+
+  for (int32_t repair = 0; repair < MAX_FIELD_LAYOUT_ATTEMPTS; repair += 1) {
+    if (!build_field_geometry(field_seed)) return 0;
+    if (count_reachable_boundary_shards() > 0) return 1;
+    if (!remove_inaccessible_boundary_sites()) return 0;
+  }
+  return 0;
+}
+
+static void initialize_field(double field_seed) {
+  current_field_seed = field_seed;
+  field_layout_variant = 0;
+  for (int32_t attempt = 0; attempt < MAX_FIELD_LAYOUT_ATTEMPTS; attempt += 1) {
+    field_layout_variant = attempt;
+    if (initialize_field_candidate(field_seed)) return;
+  }
+  // The deterministic shuffle attempts above should always find a valid ring.
+  // Keep the final candidate as a last-resort playable field if a future
+  // geometry change makes the reachability constraint unexpectedly strict.
+  initialize_field_candidate(field_seed);
 }
 
 static void initialize_balls(uint32_t seed, double field_seed_override, int32_t requested_balls) {
@@ -1019,7 +1226,7 @@ static void consider_boundary_edge_collision(
 
   double signed_start = (x - ax) * inward_x + (y - ay) * inward_y;
   double signed_movement = movement_x * inward_x + movement_y * inward_y;
-  if (signed_movement < -0.000000001) {
+  if (signed_start >= -radius && signed_movement < -0.000000001) {
     double time = signed_start <= radius ? 0.0 : (radius - signed_start) / signed_movement;
     if (time >= -0.000001 && time <= 1.000001) {
       double center_x = x + movement_x * time;
@@ -1507,9 +1714,18 @@ __attribute__((export_name("get_shard_gx"))) int32_t get_shard_gx(int32_t index)
 __attribute__((export_name("get_shard_gy"))) int32_t get_shard_gy(int32_t index) { return index >= 0 && index < shard_count ? SHARD_GY[index] : 0; }
 __attribute__((export_name("get_shard_sx"))) double get_shard_sx(int32_t index) { return index >= 0 && index < shard_count ? SHARD_SX[index] : 0.0; }
 __attribute__((export_name("get_shard_sy"))) double get_shard_sy(int32_t index) { return index >= 0 && index < shard_count ? SHARD_SY[index] : 0.0; }
-__attribute__((export_name("get_field_boundary_point_count"))) int32_t get_field_boundary_point_count(void) { return FIELD_BOUNDARY_POINT_COUNT; }
-__attribute__((export_name("get_field_boundary_point_x"))) double get_field_boundary_point_x(int32_t index) { return index >= 0 && index < FIELD_BOUNDARY_POINT_COUNT ? FIELD_BOUNDARY_X[index] : 0.0; }
-__attribute__((export_name("get_field_boundary_point_y"))) double get_field_boundary_point_y(int32_t index) { return index >= 0 && index < FIELD_BOUNDARY_POINT_COUNT ? FIELD_BOUNDARY_Y[index] : 0.0; }
+__attribute__((export_name("get_field_boundary_point_count"))) int32_t get_field_boundary_point_count(void) { return field_boundary_point_count; }
+__attribute__((export_name("get_field_boundary_point_x"))) double get_field_boundary_point_x(int32_t index) { return index >= 0 && index < field_boundary_point_count ? FIELD_BOUNDARY_X[index] : 0.0; }
+__attribute__((export_name("get_field_boundary_point_y"))) double get_field_boundary_point_y(int32_t index) { return index >= 0 && index < field_boundary_point_count ? FIELD_BOUNDARY_Y[index] : 0.0; }
+__attribute__((export_name("get_boundary_shard_count"))) int32_t get_boundary_shard_count(void) {
+  int32_t count = 0;
+  for (int32_t shard = 0; shard < shard_count; shard += 1) if (SHARD_HAS_BOUNDARY_EDGE[shard]) count += 1;
+  return count;
+}
+__attribute__((export_name("get_reachable_boundary_shard_count"))) int32_t get_reachable_boundary_shard_count(void) {
+  int32_t count = count_reachable_boundary_shards();
+  return count < 0 ? -count : count;
+}
 __attribute__((export_name("get_shard_hue"))) double get_shard_hue(int32_t index) { return index >= 0 && index < shard_count ? SHARD_HUE[index] : 0.0; }
 __attribute__((export_name("get_shard_seed"))) double get_shard_seed(int32_t index) { return index >= 0 && index < shard_count ? SHARD_SEED[index] : 0.0; }
 __attribute__((export_name("get_shard_point_count"))) int32_t get_shard_point_count(int32_t index) { return index >= 0 && index < shard_count ? POINT_COUNT[index] : 0; }

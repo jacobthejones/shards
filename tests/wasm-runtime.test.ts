@@ -99,6 +99,8 @@ test("the permanent boundary follows every exposed Voronoi edge", async () => {
   wasm.initialize_real_simulation(1234, 5678, 1);
   const shardCount = wasm.get_shard_count();
   const fieldBoundary = readFieldBoundary(wasm);
+  assert.ok(fieldBoundary.length > 180);
+  assert.equal(wasm.get_boundary_shard_count(), wasm.get_reachable_boundary_shard_count());
   const edgeCounts = new Map<string, { count: number; boundaryFlags: number }>();
   const pointKey = (x: number, y: number) => `${Math.round(x * 100_000)},${Math.round(y * 100_000)}`;
   for (let shard = 0; shard < shardCount; shard += 1) {
@@ -144,25 +146,36 @@ test("the permanent boundary follows every exposed Voronoi edge", async () => {
   for (let shard = 0; shard < shardCount; shard += 1) assert.equal(wasm.is_shard_broken(shard), 1);
 });
 
-test("randomized field boundaries remain single-loop, convex, and irregular", async () => {
+test("randomized fields keep a circular, organic, reachable outer shard ring", async () => {
   const wasm = await loadRuntime();
   for (let seed = 1; seed <= 100; seed += 1) {
     wasm.initialize_real_simulation(seed, seed * 97.31, 1);
     const boundary = readFieldBoundary(wasm);
-    assert.equal(boundary.length, 32);
-    let positiveTurns = 0;
-    for (let index = 0; index < boundary.length; index += 1) {
-      const previous = boundary[(index + boundary.length - 1) % boundary.length];
-      const current = boundary[index];
-      const next = boundary[(index + 1) % boundary.length];
-      const turn = (current[0] - previous[0]) * (next[1] - current[1])
-        - (current[1] - previous[1]) * (next[0] - current[0]);
-      assert.ok(turn > -0.0001, "the perimeter must not have inward notches");
-      if (turn > 0.0001) positiveTurns += 1;
-    }
-    assert.ok(positiveTurns > 0, "the perimeter should have visible angular variation");
+    assert.ok(boundary.length > 180, "the generated perimeter should contain many Voronoi edges");
+    assert.equal(wasm.get_boundary_shard_count(), wasm.get_reachable_boundary_shard_count());
+
+    const xValues = boundary.map(([x]) => x);
+    const yValues = boundary.map(([, y]) => y);
+    const width = Math.max(...xValues) - Math.min(...xValues);
+    const height = Math.max(...yValues) - Math.min(...yValues);
+    const aspectRatio = width / height;
+    assert.ok(aspectRatio > 0.8 && aspectRatio < 1.25, "the perimeter should remain roughly circular");
     const radii = boundary.map(([x, y]) => Math.hypot(x, y));
-    assert.ok(Math.max(...radii) - Math.min(...radii) > 0.1, "the perimeter should not be a perfect circle");
+    assert.ok(Math.max(...radii) - Math.min(...radii) > 0.1, "the perimeter should retain organic variation");
+
+    let smallestBoundaryShardArea = Number.POSITIVE_INFINITY;
+    for (let shard = 0; shard < wasm.get_shard_count(); shard += 1) {
+      const pointCount = wasm.get_shard_point_count(shard);
+      if (!Array.from({ length: pointCount }, (_, edge) => wasm.is_shard_boundary_edge(shard, edge)).some(Boolean)) continue;
+      let signedArea = 0;
+      for (let point = 0; point < pointCount; point += 1) {
+        const next = (point + 1) % pointCount;
+        signedArea += wasm.get_shard_point_x(shard, point) * wasm.get_shard_point_y(shard, next)
+          - wasm.get_shard_point_y(shard, point) * wasm.get_shard_point_x(shard, next);
+      }
+      smallestBoundaryShardArea = Math.min(smallestBoundaryShardArea, Math.abs(signedArea) / 2);
+    }
+    assert.ok(smallestBoundaryShardArea > 0.4, "the outer ring should not contain tiny partial shards");
   }
 });
 
