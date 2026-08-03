@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import vm from "node:vm";
 import test from "node:test";
 
 async function render() {
@@ -178,8 +179,68 @@ test("keeps the ripple field elemental and particle-free", async () => {
   const ripples = await readFile(new URL("../public/ripples.js", import.meta.url), "utf8");
 
   assert.match(ripples, /RIPPLE_SPEED_PX_PER_SECOND = 18 \/ 5/);
+  assert.match(ripples, /captureDistance/);
+  assert.match(ripples, /const rippleExpansion = rippleRadius - previousRippleRadius/);
+  assert.match(ripples, /pair\.captureDistance \+ rippleExpansion/);
+  assert.doesNotMatch(ripples, /CAPTURE_SPEED|DOMINANCE_GROWTH_RATE|DOMINANCE_LOSS_RATE/);
   assert.match(ripples, /name: "water"[\s\S]*beats: 2/);
   assert.match(ripples, /name: "plant"[\s\S]*beats: 0/);
   assert.match(ripples, /name: "fire"[\s\S]*beats: 1/);
   assert.doesNotMatch(ripples, /particle|reaction/i);
+});
+
+const runRippleScenario = (script, scenario, seconds) => {
+  const fills = [];
+  let currentPath = [];
+  let animationFrame;
+  const context = {
+    beginPath: () => { currentPath = []; },
+    clearRect: () => { fills.length = 0; },
+    closePath: () => {},
+    fill: () => { fills.push({ style: context.fillStyle, points: currentPath.slice() }); },
+    lineTo: (x, y) => { currentPath.push({ x, y }); },
+    moveTo: (x, y) => { currentPath.push({ x, y }); },
+    arc: () => {},
+    fillStyle: "",
+    getTransform: () => ({}),
+    restore: () => {},
+    save: () => {},
+    scale: () => {},
+    setTransform: () => {},
+    stroke: () => {},
+    translate: () => {},
+  };
+  class Canvas {}
+  const canvas = {
+    dataset: { ripplesTest: scenario },
+    getContext: () => context,
+    getBoundingClientRect: () => ({ width: 1000, height: 1000 }),
+  };
+  const window = {
+    addEventListener: () => {},
+    matchMedia: () => ({ matches: false }),
+    requestAnimationFrame: (callback) => { animationFrame = callback; },
+  };
+  const sandbox = {
+    HTMLCanvasElement: Canvas,
+    Math,
+    document: { querySelector: () => canvas },
+    performance: { now: () => 0 },
+    window,
+  };
+  Object.setPrototypeOf(canvas, Canvas.prototype);
+  vm.runInNewContext(script, sandbox);
+  const frameCount = Math.round(seconds * 60);
+  for (let frame = 1; frame <= frameCount; frame += 1) animationFrame(frame * (1000 / 60));
+  const waterRegion = fills.find((fill) => fill.style === "#9ed9ee" && fill.points.length > 10);
+  assert.ok(waterRegion, `water region was not rendered for ${scenario}`);
+  return Math.max(...waterRegion.points.map((point) => Math.hypot(point.x, point.y)));
+};
+
+test("a dominant center fills at the same rate with losing elements around it", async () => {
+  const script = await readFile(new URL("../public/ripples.js", import.meta.url), "utf8");
+  const emptyFieldRadius = runRippleScenario(script, "center-empty", 20);
+  const surroundedFieldRadius = runRippleScenario(script, "center-dominant", 20);
+
+  assert.ok(Math.abs(emptyFieldRadius - surroundedFieldRadius) < 0.003);
 });

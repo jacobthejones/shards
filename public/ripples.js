@@ -11,10 +11,7 @@
   const OUTER_RING_HUE = 43;
   const FRONT_CIRCLE_SEGMENTS = 72;
   const FIELD_BOUNDARY_SEGMENTS = 144;
-  const DOMINANCE_GROWTH_RATE = 0.018;
-  const DOMINANCE_LOSS_RATE = 0.012;
-  const MAX_ADVANTAGE = 0.22;
-  const MIN_ADVANTAGE = -0.12;
+  const MAX_CAPTURE_DISTANCE = 0.45;
   const ELEMENTS = [
     { name: "water", hue: 196, color: "#9ed9ee", beats: 2 },
     { name: "plant", hue: 104, color: "#b9e39f", beats: 0 },
@@ -28,6 +25,15 @@
   const pastelColor = (hue, alpha) => `hsla(${hue}, 64%, 80%, ${alpha})`;
   const beats = (firstKind, secondKind) => ELEMENTS[firstKind].beats === secondKind;
   const createSources = () => {
+    if (canvas.dataset?.ripplesTest === "center-empty") return [{ x: 0, y: 0, kind: 0 }];
+    if (canvas.dataset?.ripplesTest === "center-dominant") {
+      const sources = [{ x: 0, y: 0, kind: 0 }];
+      for (let sourceIndex = 0; sourceIndex < 8; sourceIndex += 1) {
+        const angle = (sourceIndex / 8) * Math.PI * 2;
+        sources.push({ x: Math.cos(angle) * 0.2, y: Math.sin(angle) * 0.2, kind: 2 });
+      }
+      return sources;
+    }
     const sources = [];
     let attempts = 0;
     while (sources.length < SOURCE_COUNT && attempts < 2500) {
@@ -37,12 +43,24 @@
       const candidate = {
         x: Math.cos(angle) * radius,
         y: Math.sin(angle) * radius,
-        advantage: 0,
         kind: sources.length % ELEMENTS.length,
       };
       if (sources.every((source) => distanceSquared(source, candidate) > 0.055 * 0.055)) sources.push(candidate);
     }
     return sources;
+  };
+  const createInteractions = (sources) => {
+    const pairs = [];
+    const bySource = sources.map(() => []);
+    for (let firstIndex = 0; firstIndex < sources.length; firstIndex += 1) {
+      for (let secondIndex = firstIndex + 1; secondIndex < sources.length; secondIndex += 1) {
+        const pair = { firstIndex, secondIndex, captureDistance: 0 };
+        pairs.push(pair);
+        bySource[firstIndex][secondIndex] = pair;
+        bySource[secondIndex][firstIndex] = pair;
+      }
+    }
+    return { pairs, bySource };
   };
   const circlePolygon = (center, radius, segmentCount) => {
     const polygon = [];
@@ -95,32 +113,19 @@
     }
     return clipped;
   };
-  const effectiveRadiusFor = (source, rippleRadius) => Math.max(0.002, rippleRadius + source.advantage);
-  const updateDominance = (sources, rippleRadius, elapsed) => {
-    const radii = sources.map((source) => effectiveRadiusFor(source, rippleRadius));
-    for (let firstIndex = 0; firstIndex < sources.length; firstIndex += 1) {
-      for (let secondIndex = firstIndex + 1; secondIndex < sources.length; secondIndex += 1) {
-        const first = sources[firstIndex];
-        const second = sources[secondIndex];
-        if (first.kind === second.kind) continue;
-        const overlap = radii[firstIndex] + radii[secondIndex] - Math.sqrt(distanceSquared(first, second));
-        if (overlap <= 0) continue;
-        const winner = beats(first.kind, second.kind) ? first : second;
-        const loser = winner === first ? second : first;
-        const contact = Math.min(1, overlap / 0.2);
-        winner.advantage += DOMINANCE_GROWTH_RATE * contact * elapsed;
-        loser.advantage -= DOMINANCE_LOSS_RATE * contact * elapsed;
-      }
-    }
-    sources.forEach((source) => {
-      source.advantage = Math.max(MIN_ADVANTAGE, Math.min(MAX_ADVANTAGE, source.advantage));
+  const updateDominance = (sources, interactions, rippleRadius, rippleExpansion) => {
+    interactions.pairs.forEach((pair) => {
+      const first = sources[pair.firstIndex];
+      const second = sources[pair.secondIndex];
+      if (first.kind === second.kind) return;
+      if (rippleRadius * 2 <= Math.sqrt(distanceSquared(first, second))) return;
+      pair.captureDistance = Math.min(MAX_CAPTURE_DISTANCE, pair.captureDistance + rippleExpansion);
     });
   };
-  const drawElementRegions = (sources, rippleRadius, pixelScale) => {
+  const drawElementRegions = (sources, interactions, rippleRadius, pixelScale) => {
     const fieldBoundary = circlePolygon({ x: 0, y: 0 }, 1, FIELD_BOUNDARY_SEGMENTS);
-    const radii = sources.map((source) => effectiveRadiusFor(source, rippleRadius));
     sources.forEach((source, sourceIndex) => {
-      let region = circlePolygon(source, radii[sourceIndex], FRONT_CIRCLE_SEGMENTS);
+      let region = circlePolygon(source, Math.max(0.002, rippleRadius), FRONT_CIRCLE_SEGMENTS);
       region = clipToConvexBoundary(region, fieldBoundary);
       for (let otherIndex = 0; otherIndex < sources.length && region.length > 0; otherIndex += 1) {
         if (otherIndex === sourceIndex) continue;
@@ -128,10 +133,19 @@
         const normalX = 2 * (other.x - source.x);
         const normalY = 2 * (other.y - source.y);
         const limit = other.x * other.x + other.y * other.y
-          - source.x * source.x - source.y * source.y
-          + radii[sourceIndex] * radii[sourceIndex]
-          - radii[otherIndex] * radii[otherIndex];
-        region = clipPolygon(region, normalX, normalY, limit);
+          - source.x * source.x - source.y * source.y;
+        const pair = interactions.bySource[sourceIndex][otherIndex];
+        const separation = Math.sqrt(distanceSquared(source, other));
+        const winnerIndex = pair && beats(sources[pair.firstIndex].kind, sources[pair.secondIndex].kind)
+          ? pair.firstIndex
+          : pair?.secondIndex;
+        const captureDirection = winnerIndex === sourceIndex ? 1 : -1;
+        region = clipPolygon(
+          region,
+          normalX,
+          normalY,
+          limit + captureDirection * 2 * separation * (pair?.captureDistance ?? 0),
+        );
       }
       if (region.length < 3) return;
       const element = ELEMENTS[source.kind];
@@ -182,6 +196,7 @@
   };
 
   const sources = createSources();
+  const interactions = createInteractions(sources);
   const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   let width = 1;
   let height = 1;
@@ -196,7 +211,7 @@
     context.save();
     context.translate(width / 2, height * 0.53);
     context.scale(fieldRadius, fieldRadius);
-    drawElementRegions(sources, rippleRadius, fieldRadius);
+    drawElementRegions(sources, interactions, rippleRadius, fieldRadius);
     drawFieldOutline(1, fieldRadius);
     drawSources(sources, fieldRadius);
     context.restore();
@@ -214,11 +229,13 @@
   const tick = (now) => {
     const elapsed = Math.min(0.05, Math.max(0, (now - lastTime) / 1000));
     lastTime = now;
+    const previousRippleRadius = rippleRadius;
     if (!finished) {
       rippleRadius = Math.min(1.08, rippleRadius + (RIPPLE_SPEED_PX_PER_SECOND / Math.max(1, Math.min(width, height) * FIELD_RADIUS_FRACTION)) * elapsed);
       if (rippleRadius >= 1.08) finished = true;
     }
-    updateDominance(sources, rippleRadius, elapsed);
+    const rippleExpansion = rippleRadius - previousRippleRadius;
+    updateDominance(sources, interactions, rippleRadius, rippleExpansion);
     draw();
     window.requestAnimationFrame(tick);
   };
