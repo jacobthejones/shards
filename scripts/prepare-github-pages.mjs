@@ -24,6 +24,10 @@ for (const filePath of await collectFiles(outputRoot)) {
   const source = await readFile(filePath, "utf8");
   const rewritten = source
     .replaceAll("/assets/", "/shards/assets/")
+    // Vinext keeps some lazy chunk references relative to the asset directory.
+    // Make those project-site-safe too; otherwise they resolve from /assets.
+    .replaceAll('"assets/', '"/shards/assets/')
+    .replaceAll("'assets/", "'/shards/assets/")
     .replaceAll("/favicon.svg", "/shards/favicon.svg")
     .replaceAll("/simulation.wasm", "/shards/simulation.wasm");
 
