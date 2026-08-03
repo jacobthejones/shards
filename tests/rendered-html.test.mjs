@@ -189,18 +189,25 @@ test("keeps the ripple field elemental and particle-free", async () => {
   assert.doesNotMatch(ripples, /particle|reaction/i);
 });
 
-const runRippleScenario = (script, scenario, seconds) => {
+const runRippleScenario = (script, scenario, seconds, dominantColor = "#9ed9ee") => {
   const fills = [];
   let currentPath = [];
   let animationFrame;
   const context = {
     beginPath: () => { currentPath = []; },
     clearRect: () => { fills.length = 0; },
+    clip: () => {},
     closePath: () => {},
     fill: () => { fills.push({ style: context.fillStyle, points: currentPath.slice() }); },
     lineTo: (x, y) => { currentPath.push({ x, y }); },
     moveTo: (x, y) => { currentPath.push({ x, y }); },
-    arc: () => {},
+    arc: (x, y, radius, startAngle, endAngle) => {
+      const segmentCount = 72;
+      for (let segment = 0; segment <= segmentCount; segment += 1) {
+        const angle = startAngle + ((endAngle - startAngle) * segment) / segmentCount;
+        currentPath.push({ x: x + Math.cos(angle) * radius, y: y + Math.sin(angle) * radius });
+      }
+    },
     fillStyle: "",
     getTransform: () => ({}),
     restore: () => {},
@@ -232,15 +239,16 @@ const runRippleScenario = (script, scenario, seconds) => {
   vm.runInNewContext(script, sandbox);
   const frameCount = Math.round(seconds * 60);
   for (let frame = 1; frame <= frameCount; frame += 1) animationFrame(frame * (1000 / 60));
-  const waterRegion = fills.find((fill) => fill.style === "#9ed9ee" && fill.points.length > 10);
-  assert.ok(waterRegion, `water region was not rendered for ${scenario}`);
-  return Math.max(...waterRegion.points.map((point) => Math.hypot(point.x, point.y)));
+  const dominantRegion = fills.find((fill) => fill.style === dominantColor && fill.points.length > 10);
+  assert.ok(dominantRegion, `dominant region was not rendered for ${scenario}`);
+  return Math.max(...dominantRegion.points.map((point) => Math.hypot(point.x, point.y)));
 };
 
-test("a dominant center fills at the same rate with losing elements around it", async () => {
+test("every dominant center fills at the same rate with losing elements around it", async () => {
   const script = await readFile(new URL("../public/ripples.js", import.meta.url), "utf8");
-  const emptyFieldRadius = runRippleScenario(script, "center-empty", 20);
-  const surroundedFieldRadius = runRippleScenario(script, "center-dominant", 20);
-
-  assert.ok(Math.abs(emptyFieldRadius - surroundedFieldRadius) < 0.003);
+  const emptyFieldRadius = runRippleScenario(script, "center-empty", 20, "#9ed9ee");
+  for (const [scenario, color] of [["center-water", "#9ed9ee"], ["center-plant", "#b9e39f"], ["center-fire", "#f1b18c"]]) {
+    const surroundedFieldRadius = runRippleScenario(script, scenario, 20, color);
+    assert.ok(Math.abs(emptyFieldRadius - surroundedFieldRadius) < 0.003, `${scenario} was slowed by its losing ring`);
+  }
 });

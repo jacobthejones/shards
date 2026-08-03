@@ -9,8 +9,6 @@
   const RIPPLE_SPEED_PX_PER_SECOND = 18 / 5;
   const FIELD_RADIUS_FRACTION = 0.38;
   const OUTER_RING_HUE = 43;
-  const FRONT_CIRCLE_SEGMENTS = 72;
-  const FIELD_BOUNDARY_SEGMENTS = 144;
   const MAX_CAPTURE_DISTANCE = 0.45;
   const ELEMENTS = [
     { name: "water", hue: 196, color: "#9ed9ee", beats: 2 },
@@ -26,11 +24,18 @@
   const beats = (firstKind, secondKind) => ELEMENTS[firstKind].beats === secondKind;
   const createSources = () => {
     if (canvas.dataset?.ripplesTest === "center-empty") return [{ x: 0, y: 0, kind: 0 }];
-    if (canvas.dataset?.ripplesTest === "center-dominant") {
-      const sources = [{ x: 0, y: 0, kind: 0 }];
+    const dominantKindForTest = {
+      "center-dominant": 0,
+      "center-water": 0,
+      "center-plant": 1,
+      "center-fire": 2,
+    }[canvas.dataset?.ripplesTest];
+    if (dominantKindForTest !== undefined) {
+      const sources = [{ x: 0, y: 0, kind: dominantKindForTest }];
+      const losingKind = ELEMENTS[dominantKindForTest].beats;
       for (let sourceIndex = 0; sourceIndex < 8; sourceIndex += 1) {
         const angle = (sourceIndex / 8) * Math.PI * 2;
-        sources.push({ x: Math.cos(angle) * 0.2, y: Math.sin(angle) * 0.2, kind: 2 });
+        sources.push({ x: Math.cos(angle) * 0.2, y: Math.sin(angle) * 0.2, kind: losingKind });
       }
       return sources;
     }
@@ -62,57 +67,6 @@
     }
     return { pairs, bySource };
   };
-  const circlePolygon = (center, radius, segmentCount) => {
-    const polygon = [];
-    for (let segment = 0; segment < segmentCount; segment += 1) {
-      const angle = (segment / segmentCount) * Math.PI * 2;
-      polygon.push({
-        x: center.x + Math.cos(angle) * radius,
-        y: center.y + Math.sin(angle) * radius,
-      });
-    }
-    return polygon;
-  };
-  const clipPolygon = (polygon, normalX, normalY, limit) => {
-    if (polygon.length === 0) return polygon;
-    const clipped = [];
-    for (let index = 0; index < polygon.length; index += 1) {
-      const current = polygon[index];
-      const next = polygon[(index + 1) % polygon.length];
-      const currentValue = normalX * current.x + normalY * current.y - limit;
-      const nextValue = normalX * next.x + normalY * next.y - limit;
-      const currentInside = currentValue <= 0;
-      const nextInside = nextValue <= 0;
-      if (currentInside && nextInside) {
-        clipped.push(next);
-      } else if (currentInside && !nextInside) {
-        const ratio = currentValue / (currentValue - nextValue);
-        clipped.push({
-          x: current.x + (next.x - current.x) * ratio,
-          y: current.y + (next.y - current.y) * ratio,
-        });
-      } else if (!currentInside && nextInside) {
-        const ratio = currentValue / (currentValue - nextValue);
-        clipped.push({
-          x: current.x + (next.x - current.x) * ratio,
-          y: current.y + (next.y - current.y) * ratio,
-        });
-        clipped.push(next);
-      }
-    }
-    return clipped;
-  };
-  const clipToConvexBoundary = (polygon, boundary) => {
-    let clipped = polygon;
-    for (let index = 0; index < boundary.length && clipped.length > 0; index += 1) {
-      const start = boundary[index];
-      const end = boundary[(index + 1) % boundary.length];
-      const edgeX = end.x - start.x;
-      const edgeY = end.y - start.y;
-      clipped = clipPolygon(clipped, edgeY, -edgeX, edgeY * start.x - edgeX * start.y);
-    }
-    return clipped;
-  };
   const updateDominance = (sources, interactions, rippleRadius, rippleExpansion) => {
     interactions.pairs.forEach((pair) => {
       const first = sources[pair.firstIndex];
@@ -123,45 +77,36 @@
     });
   };
   const drawElementRegions = (sources, interactions, rippleRadius, pixelScale) => {
-    const fieldBoundary = circlePolygon({ x: 0, y: 0 }, 1, FIELD_BOUNDARY_SEGMENTS);
-    sources.forEach((source, sourceIndex) => {
-      let region = circlePolygon(source, Math.max(0.002, rippleRadius), FRONT_CIRCLE_SEGMENTS);
-      region = clipToConvexBoundary(region, fieldBoundary);
-      for (let otherIndex = 0; otherIndex < sources.length && region.length > 0; otherIndex += 1) {
+    const drawOrder = sources.map((source, sourceIndex) => {
+      let priority = sourceIndex * 0.000001;
+      for (let otherIndex = 0; otherIndex < sources.length; otherIndex += 1) {
         if (otherIndex === sourceIndex) continue;
         const other = sources[otherIndex];
-        if (source.kind === other.kind || beats(source.kind, other.kind)) continue;
-        const normalX = 2 * (other.x - source.x);
-        const normalY = 2 * (other.y - source.y);
-        const limit = other.x * other.x + other.y * other.y
-          - source.x * source.x - source.y * source.y;
+        if (source.kind === other.kind || rippleRadius * 2 <= Math.sqrt(distanceSquared(source, other))) continue;
         const pair = interactions.bySource[sourceIndex][otherIndex];
-        const separation = Math.sqrt(distanceSquared(source, other));
-        const winnerIndex = pair && beats(sources[pair.firstIndex].kind, sources[pair.secondIndex].kind)
+        const winnerIndex = beats(sources[pair.firstIndex].kind, sources[pair.secondIndex].kind)
           ? pair.firstIndex
-          : pair?.secondIndex;
-        const captureDirection = winnerIndex === sourceIndex ? 1 : -1;
-        region = clipPolygon(
-          region,
-          normalX,
-          normalY,
-          limit + captureDirection * 2 * separation * (pair?.captureDistance ?? 0),
-        );
+          : pair.secondIndex;
+        priority += (winnerIndex === sourceIndex ? 1 : -1) * (0.001 + pair.captureDistance);
       }
-      if (region.length < 3) return;
+      return { source, priority };
+    }).sort((first, second) => first.priority - second.priority);
+
+    context.save();
+    context.beginPath();
+    context.arc(0, 0, 1, 0, Math.PI * 2);
+    context.clip();
+    drawOrder.forEach(({ source }) => {
       const element = ELEMENTS[source.kind];
       context.beginPath();
-      context.moveTo(region[0].x, region[0].y);
-      for (let pointIndex = 1; pointIndex < region.length; pointIndex += 1) {
-        context.lineTo(region[pointIndex].x, region[pointIndex].y);
-      }
-      context.closePath();
+      context.arc(source.x, source.y, Math.max(0.002, rippleRadius), 0, Math.PI * 2);
       context.fillStyle = element.color;
       context.shadowColor = pastelColor(element.hue, 0.38);
       context.shadowBlur = 10 / pixelScale;
       context.fill();
       context.shadowBlur = 0;
     });
+    context.restore();
   };
   const drawFieldOutline = (fieldRadius, pixelScale) => {
     context.beginPath();
