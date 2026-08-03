@@ -8,6 +8,7 @@ import {
   fieldCircleDiameterFractionFor,
   maxViewRadiusForFieldCircle,
   playableViewportFor,
+  playableViewportForUiRects,
 } from "../app/camera";
 
 test("playable viewport removes the top and bottom UI from its usable height", () => {
@@ -26,6 +27,23 @@ test("the width remains the limiting dimension when it is smaller than the usabl
 
   assert.equal(viewport.height, 680);
   assert.equal(viewport.minimumDimension, 360);
+});
+
+test("hidden bottom UI does not collapse the playable viewport to one pixel", () => {
+  const viewport = playableViewportForUiRects(
+    390,
+    844,
+    [{ top: 0, bottom: 88, height: 88 }],
+    [
+      { top: 761, bottom: 819, height: 58 },
+      { top: 0, bottom: 0, height: 0 },
+    ],
+  );
+
+  assert.equal(viewport.top, 88);
+  assert.equal(viewport.bottom, 761);
+  assert.equal(viewport.height, 673);
+  assert.equal(viewport.minimumDimension, 390);
 });
 
 test("the maximum camera radius places the field circle at 96 percent of the usable minimum dimension", () => {

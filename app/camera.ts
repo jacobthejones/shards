@@ -8,6 +8,12 @@ export type PlayableViewport = {
   minimumDimension: number;
 };
 
+export type ViewportUiRect = {
+  top: number;
+  bottom: number;
+  height: number;
+};
+
 export const playableViewportFor = (
   width: number,
   height: number,
@@ -24,6 +30,23 @@ export const playableViewportFor = (
     height: playableHeight,
     minimumDimension: Math.min(Math.max(1, width), playableHeight),
   };
+};
+
+export const playableViewportForUiRects = (
+  width: number,
+  height: number,
+  topRects: readonly ViewportUiRect[],
+  bottomRects: readonly ViewportUiRect[],
+) => {
+  const visibleTopRects = topRects.filter((rect) => rect.height > 0);
+  const visibleBottomRects = bottomRects.filter((rect) => rect.height > 0);
+  const topInset = visibleTopRects.length > 0
+    ? Math.max(...visibleTopRects.map((rect) => rect.bottom))
+    : 0;
+  const bottomUiTop = visibleBottomRects.length > 0
+    ? Math.min(...visibleBottomRects.map((rect) => rect.top))
+    : height;
+  return playableViewportFor(width, height, topInset, height - bottomUiTop);
 };
 
 export const cameraScaleFor = (viewport: PlayableViewport, viewRadius: number) => {

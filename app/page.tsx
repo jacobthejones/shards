@@ -8,6 +8,7 @@ import {
   fieldBoundaryRadiusFor,
   maxViewRadiusForFieldCircle,
   playableViewportFor,
+  playableViewportForUiRects,
 } from "./camera";
 import {
   BASE_BALL_RADIUS,
@@ -454,15 +455,18 @@ export default function Home() {
       dpr = Math.min(window.devicePixelRatio || 1, 2);
       width = Math.max(1, bounds.width);
       height = Math.max(1, bounds.height);
-      const topUiBottom = Math.max(
-        gameTopbarRef.current?.getBoundingClientRect().bottom ?? 0,
-        gameStateRef.current?.getBoundingClientRect().bottom ?? 0,
+      playableViewport = playableViewportForUiRects(
+        width,
+        height,
+        [
+          gameTopbarRef.current?.getBoundingClientRect(),
+          gameStateRef.current?.getBoundingClientRect(),
+        ].filter((rect): rect is DOMRect => rect !== undefined),
+        [
+          bottomHudRef.current?.getBoundingClientRect(),
+          cornerNoteRef.current?.getBoundingClientRect(),
+        ].filter((rect): rect is DOMRect => rect !== undefined),
       );
-      const bottomUiTop = Math.min(
-        bottomHudRef.current?.getBoundingClientRect().top ?? height,
-        cornerNoteRef.current?.getBoundingClientRect().top ?? height,
-      );
-      playableViewport = playableViewportFor(width, height, topUiBottom, height - bottomUiTop);
       canvas.width = Math.floor(width * dpr);
       canvas.height = Math.floor(height * dpr);
       context.setTransform(dpr, 0, 0, dpr, 0, 0);
