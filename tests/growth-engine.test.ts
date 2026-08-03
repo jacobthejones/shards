@@ -45,6 +45,36 @@ test("growth mode preserves the current shard geometry and exposed jagged bounda
   assert.ok(state.fieldRadius > 7.4);
 });
 
+test("the jagged boundary does not pull interior balls to a corner", () => {
+  const state = createGrowthState([{
+    key: "0:0",
+    gx: 0,
+    gy: 0,
+    sx: 0,
+    sy: 0,
+    points: [[-1, -1], [1, -1], [1, 1], [-1, 1]],
+    hue: 188,
+    seed: 1,
+    fieldSeed: 42,
+    boundaryEdges: [
+      [[-10, -1], [0, -10]],
+      [[0, -10], [10, -1]],
+      [[10, -1], [1, 10]],
+      [[1, 10], [-10, -1]],
+    ],
+  }]);
+  enterGrowthMode(state);
+  const ball = state.balls[0];
+  ball.x = 0;
+  ball.y = 0;
+  ball.vx = 1;
+  ball.vy = 0;
+
+  stepGrowthState(state, 0.05);
+
+  assert.ok(Math.hypot(ball.x, ball.y) < 2);
+});
+
 test("incomplete growth decays at one percent per second", () => {
   const state = createGrowthState();
   enterGrowthMode(state);

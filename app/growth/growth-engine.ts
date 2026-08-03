@@ -272,8 +272,8 @@ const bounceOffField = (ball: GrowthBall, state: GrowthState) => {
       normalY = -normalY;
     }
     const closest = distanceToSegment(ball.x, ball.y, ax, ay, bx, by);
+    if (closest.distance > BALL_RADIUS) continue;
     const signedDistance = (ball.x - closest.closestX) * normalX + (ball.y - closest.closestY) * normalY;
-    if (signedDistance <= -BALL_RADIUS) continue;
     if (!best || signedDistance > best.signedDistance) {
       best = { signedDistance, normalX, normalY, closestX: closest.closestX, closestY: closest.closestY };
     }
