@@ -20,7 +20,7 @@ test("server-renders the shards experience", async () => {
   assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
 
   const html = await response.text();
-  assert.match(html, /<title>shards — a study in regeneration<\/title>/i);
+  assert.match(html, /<title>shards<\/title>/i);
   assert.match(html, /An idle field that breathes back/);
   assert.match(html, /SHARDS/);
   assert.match(html, /SHARDS BROKEN/);
@@ -123,7 +123,7 @@ test("keeps the prototype self-contained", async () => {
   assert.doesNotMatch(simulation, /arrows\.length >= 8/);
   assert.doesNotMatch(simulation, /new Set\(\[keyFor\(0, 0\)/);
   assert.doesNotMatch(simulation, /prism tip|dampener|ball size|BALL_SIZE_COST|buyBallSize/i);
-  assert.match(layout, /title: "shards — a study in regeneration"/);
+  assert.match(layout, /title: "shards"/);
   assert.match(css, /\.field-canvas/);
   assert.match(css, /prefers-reduced-motion|@keyframes sound-wave/);
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);

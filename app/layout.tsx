@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "shards — a study in regeneration",
+  title: "shards",
   description: "An idle field that breathes back. Make room for nothing.",
   icons: {
     icon: "/favicon.svg",
