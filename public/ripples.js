@@ -76,6 +76,7 @@
       pair.captureDistance = Math.min(MAX_CAPTURE_DISTANCE, pair.captureDistance + rippleExpansion);
     });
   };
+  const elementLayers = [];
   const drawElementRegions = (sources, interactions, rippleRadius, pixelScale) => {
     const drawOrder = sources.map((source, sourceIndex) => {
       let priority = sourceIndex * 0.000001;
@@ -107,6 +108,49 @@
       context.shadowBlur = 0;
     });
     context.restore();
+
+    if (typeof document.createElement !== "function" || typeof context.drawImage !== "function") return;
+    while (elementLayers.length < sources.length) {
+      const layerCanvas = document.createElement("canvas");
+      const layerContext = layerCanvas.getContext("2d");
+      if (!layerContext) return;
+      elementLayers.push({ canvas: layerCanvas, context: layerContext });
+    }
+    sources.forEach((source, sourceIndex) => {
+      const layer = elementLayers[sourceIndex];
+      if (layer.canvas.width !== canvas.width || layer.canvas.height !== canvas.height) {
+        layer.canvas.width = canvas.width;
+        layer.canvas.height = canvas.height;
+      }
+      const layerContext = layer.context;
+      layerContext.setTransform(1, 0, 0, 1, 0, 0);
+      layerContext.clearRect(0, 0, layer.canvas.width, layer.canvas.height);
+      layerContext.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
+      layerContext.save();
+      layerContext.translate(width / 2, height * 0.53);
+      layerContext.scale(Math.min(width, height) * FIELD_RADIUS_FRACTION, Math.min(width, height) * FIELD_RADIUS_FRACTION);
+      layerContext.beginPath();
+      layerContext.arc(0, 0, 1, 0, Math.PI * 2);
+      layerContext.clip();
+      layerContext.beginPath();
+      layerContext.arc(source.x, source.y, Math.max(0.002, rippleRadius), 0, Math.PI * 2);
+      layerContext.fillStyle = ELEMENTS[source.kind].color;
+      layerContext.fill();
+      layerContext.globalCompositeOperation = "destination-out";
+      for (let otherIndex = 0; otherIndex < sources.length; otherIndex += 1) {
+        if (otherIndex === sourceIndex) continue;
+        const other = sources[otherIndex];
+        if (other.kind === source.kind || !beats(other.kind, source.kind)) continue;
+        layerContext.beginPath();
+        layerContext.arc(other.x, other.y, Math.max(0.002, rippleRadius), 0, Math.PI * 2);
+        layerContext.fill();
+      }
+      layerContext.restore();
+      context.save();
+      context.setTransform(1, 0, 0, 1, 0, 0);
+      context.drawImage(layer.canvas, 0, 0);
+      context.restore();
+    });
   };
   const drawFieldOutline = (fieldRadius, pixelScale) => {
     context.beginPath();
