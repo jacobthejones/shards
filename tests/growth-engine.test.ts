@@ -88,7 +88,6 @@ test("a shard starts growing only after the ball leaves it", () => {
     ball.vy = 0;
   });
   const ball = state.balls[0];
-  state.balls = [ball];
   ball.x = shard.sx;
   ball.y = shard.sy;
   ball.vx = 1.4;
@@ -145,4 +144,30 @@ test("a growing shard becomes tangible at full growth", () => {
   assert.equal(shard.growing, false);
   assert.equal(shard.tangible, true);
   assert.equal(state.growthCompletions, 1);
+});
+
+test("a ball passing through a growing shard does not reset it", () => {
+  const state = createGrowthState();
+  enterGrowthMode(state);
+  const shard = state.shards.get(state.finalShardKey);
+  assert.ok(shard);
+  shard.growth = 0.5;
+  shard.growing = true;
+
+  state.balls.forEach((ball) => {
+    ball.x = 0;
+    ball.y = 7;
+    ball.vx = 0;
+    ball.vy = 0;
+  });
+  const ball = state.balls[0];
+  ball.x = shard.sx - 1;
+  ball.y = shard.sy;
+  ball.vx = 1.4;
+  ball.vy = 0;
+
+  for (let index = 0; index < 30; index += 1) stepGrowthState(state, 0.05);
+
+  assert.equal(shard.growing, true);
+  assert.ok(shard.growth > 0.5);
 });

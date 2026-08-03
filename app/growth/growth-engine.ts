@@ -395,36 +395,33 @@ const beginGrowth = (shard: GrowthShard) => {
   shard.growthPending = false;
 };
 
-const resetGrowth = (shard: GrowthShard) => {
-  if (!shard.growing) return;
-  shard.growth = 0;
-  shard.growing = false;
-  shard.growthPending = false;
+type BallPath = {
+  startX: number;
+  startY: number;
+  endX: number;
+  endY: number;
 };
 
-const processGrowthPath = (
+const processGrowthPaths = (
   state: GrowthState,
-  startX: number,
-  startY: number,
-  endX: number,
-  endY: number,
+  paths: BallPath[],
 ) => {
   state.shards.forEach((shard) => {
-    if (shard.tangible) return;
-    const pathIntersects = segmentIntersectsPolygon(startX, startY, endX, endY, shard.points);
-    if (shard.growing && pathIntersects) {
-      resetGrowth(shard);
-      return;
-    }
-
-    const currentOverlaps = circleOverlapsShard(startX, startY, shard);
-    const endpointOverlaps = circleOverlapsShard(endX, endY, shard);
+    if (shard.tangible || shard.growing) return;
+    const pathIntersects = paths.some((path) => segmentIntersectsPolygon(
+      path.startX,
+      path.startY,
+      path.endX,
+      path.endY,
+      shard.points,
+    ));
+    const endpointOverlaps = paths.some((path) => circleOverlapsShard(path.endX, path.endY, shard));
     if (shard.growthPending) {
-      if (!currentOverlaps && (!pathIntersects || !endpointOverlaps)) beginGrowth(shard);
+      if (!endpointOverlaps) beginGrowth(shard);
       return;
     }
     if (!pathIntersects) return;
-    if (currentOverlaps || endpointOverlaps) shard.growthPending = true;
+    if (endpointOverlaps) shard.growthPending = true;
     else beginGrowth(shard);
   });
 };
@@ -467,6 +464,7 @@ export const stepGrowthState = (state: GrowthState, elapsedSeconds: number) => {
   const delta = Math.min(0.05, Math.max(0, elapsedSeconds));
   if (delta === 0) return;
   state.time += delta;
+  const paths: BallPath[] = [];
   state.balls.forEach((ball) => {
     const startX = ball.x;
     const startY = ball.y;
@@ -475,7 +473,7 @@ export const stepGrowthState = (state: GrowthState, elapsedSeconds: number) => {
     bounceOffField(ball, state);
     if (state.mode === "growth") bounceOffTangibleShards(state, ball);
     addTrailPoint(ball, delta);
-    if (state.mode === "growth") processGrowthPath(state, startX, startY, ball.x, ball.y);
+    if (state.mode === "growth") paths.push({ startX, startY, endX: ball.x, endY: ball.y });
   });
 
   if (state.mode === "finale") {
@@ -483,5 +481,6 @@ export const stepGrowthState = (state: GrowthState, elapsedSeconds: number) => {
     if (state.finaleRemaining === 0) enterGrowthMode(state);
     return;
   }
+  processGrowthPaths(state, paths);
   refreshGrowth(state, delta);
 };
