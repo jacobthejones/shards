@@ -1,8 +1,8 @@
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: "ripples — after the field",
-  description: "A quiet wavefront study after the shards have gone still.",
+  title: "growth — after the field",
+  description: "Regrow the field with the balls that cleared it.",
 };
 
 export const dynamic = "force-static";
