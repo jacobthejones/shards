@@ -921,11 +921,15 @@ static void damage_shard(
   }
 }
 
-static void apply_resonance(int32_t source, int32_t ball) {
+static double damage_multiplier_for_ball(int32_t ball) {
+  double multiplier = 1.0;
+  if (chosen_one_unlocked && ball == CHOSEN_BALL_INDEX) multiplier *= CHOSEN_ONE_DAMAGE_MULTIPLIER;
+  if (BALL_CORROSIVE_WAKE_CHARGED[ball]) multiplier *= CHOSEN_ONE_DAMAGE_MULTIPLIER;
+  return multiplier;
+}
+
+static void apply_resonance(int32_t source, double splash_multiplier) {
   if (!resonance_unlocked) return;
-  double splash_multiplier = chosen_one_unlocked && ball == CHOSEN_BALL_INDEX
-    ? CHOSEN_ONE_DAMAGE_MULTIPLIER
-    : 1.0;
   int32_t first_neighbors[MAX_TOUCHING_SHARDS];
   int32_t first_count = collect_touching_shards(source, first_neighbors, MAX_TOUCHING_SHARDS);
   for (int32_t index = 0; index < first_count; index += 1) {
@@ -1462,17 +1466,23 @@ static void step_simulation(void) {
         BALL_VY[ball] = bounced_x * jitter_sine + bounced_y * jitter_cosine;
         record_event(1, collision.shard, collision.shard);
         if (!collision.boundary) {
+          double damage_multiplier = damage_multiplier_for_ball(ball);
           if (BALL_HIT_COOLDOWN[ball] <= 0.0) {
-            double direct_damage = BASE_HIT_DAMAGE;
-            if (chosen_one_unlocked && ball == CHOSEN_BALL_INDEX) direct_damage *= CHOSEN_ONE_DAMAGE_MULTIPLIER;
+            damage_shard(
+              collision.shard,
+              BASE_HIT_DAMAGE * damage_multiplier,
+              collision.point_x,
+              collision.point_y,
+              -collision.normal_x,
+              -collision.normal_y,
+              1
+            );
             if (BALL_CORROSIVE_WAKE_CHARGED[ball]) {
-              direct_damage *= CHOSEN_ONE_DAMAGE_MULTIPLIER;
               BALL_CORROSIVE_WAKE_CHARGED[ball] = 0;
             }
-            damage_shard(collision.shard, direct_damage, collision.point_x, collision.point_y, -collision.normal_x, -collision.normal_y, 1);
             BALL_HIT_COOLDOWN[ball] = 0.14;
           }
-          apply_resonance(collision.shard, ball);
+          apply_resonance(collision.shard, damage_multiplier);
         }
       }
       remaining *= (1.0 - collision.time) > 0.0 ? 1.0 - collision.time : 0.0;

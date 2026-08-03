@@ -418,6 +418,38 @@ test("The Chosen One multiplies Resonance and Conduction splash damage", async (
   assert.equal(hasQuarterDamageConduction, true);
 });
 
+test("Corrosive Wake multiplies Resonance and Conduction splash damage", async () => {
+  const wasm = await loadRuntime();
+  wasm.initialize_real_simulation(7, 77, 1);
+  wasm.set_tech_resonance_state(1);
+  wasm.set_tech_conduction_state(1);
+  prepareSingleCollision(wasm, true);
+  wasm.set_ball_corrosive_wake_charge(0, 1);
+  advanceToEvent(wasm, 3);
+
+  let resonanceEvents = 0;
+  let conductionEvents = 0;
+  let hasCorrosiveResonanceDamage = false;
+  let hasCorrosiveConductionDamage = false;
+  for (let index = 0; index < wasm.get_event_count(); index += 1) {
+    const type = wasm.get_event_type(index);
+    const health = wasm.get_shard_health(wasm.get_event_shard(index));
+    if (type === 2) {
+      resonanceEvents += 1;
+      if (Math.abs((1 - health) - 0.5) < 0.000001) hasCorrosiveResonanceDamage = true;
+    }
+    if (type === 4) {
+      conductionEvents += 1;
+      if (Math.abs((1 - health) - 0.25) < 0.000001) hasCorrosiveConductionDamage = true;
+    }
+  }
+  assert.ok(resonanceEvents > 0);
+  assert.ok(conductionEvents > 0);
+  assert.equal(hasCorrosiveResonanceDamage, true);
+  assert.equal(hasCorrosiveConductionDamage, true);
+  assert.equal(wasm.get_ball_corrosive_wake_charge(0), 0);
+});
+
 test("Resonance and Conduction purchase, refund, and propagate damage", async () => {
   const wasm = await loadRuntime();
   wasm.initialize_real_simulation(7, 77, 1);
