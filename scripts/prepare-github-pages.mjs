@@ -3,6 +3,7 @@ import path from "node:path";
 
 const outputRoot = path.resolve("dist/client");
 const textExtensions = new Set([".css", ".html", ".js", ".json", ".rsc"]);
+const assetVersion = (process.env.GITHUB_SHA ?? "local").slice(0, 12);
 
 const collectFiles = async (directory) => {
   const entries = await readdir(directory, { withFileTypes: true });
@@ -29,7 +30,8 @@ for (const filePath of await collectFiles(outputRoot)) {
     .replaceAll('"assets/', '"/shards/assets/')
     .replaceAll("'assets/", "'/shards/assets/")
     .replaceAll("/favicon.svg", "/shards/favicon.svg")
-    .replaceAll("/simulation.wasm", "/shards/simulation.wasm");
+    .replaceAll("/simulation.wasm", "/shards/simulation.wasm")
+    .replaceAll(/\/shards\/assets\/([A-Za-z0-9._-]+)/g, `/shards/assets/$1?v=${assetVersion}`);
 
   if (rewritten !== source) await writeFile(filePath, rewritten);
 }
