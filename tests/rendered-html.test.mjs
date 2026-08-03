@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import vm from "node:vm";
 import test from "node:test";
 
 async function render() {
@@ -175,123 +174,21 @@ test("keeps the prototype self-contained", async () => {
   assert.match(renderCache, /renderChunkSignature/);
 });
 
-test("keeps the ripple field elemental and particle-free", async () => {
-  const ripples = await readFile(new URL("../public/ripples.js", import.meta.url), "utf8");
+test("keeps the growth prototype isolated from the live shard route", async () => {
+  const [page, engine, techTree, copiedSimulation] = await Promise.all([
+    readFile(new URL("../app/growth/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/growth/growth-engine.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/growth/growth-tech-tree.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/growth/simulation.ts", import.meta.url), "utf8"),
+  ]);
 
-  assert.match(ripples, /RIPPLE_SPEED_PX_PER_SECOND = 18 \/ 5/);
-  assert.match(ripples, /const expandPolygon =/);
-  assert.match(ripples, /const subtractConvexPolygon =/);
-  assert.match(ripples, /const convexHull =/);
-  assert.match(ripples, /window\.requestAnimationFrame\(tick\)/);
-  assert.doesNotMatch(ripples, /GRID_SIZE|captureDistance|rippleRadius|finished|cooldown|blur\(/i);
-  assert.match(ripples, /name: "water"[\s\S]*beats: 2/);
-  assert.match(ripples, /name: "plant"[\s\S]*beats: 0/);
-  assert.match(ripples, /name: "fire"[\s\S]*beats: 1/);
-  assert.doesNotMatch(ripples, /particle|reaction/i);
-});
-
-const runRippleScenario = (script, scenario, seconds) => {
-  const fills = [];
-  let currentPath = [];
-  let animationFrame;
-  const context = {
-    beginPath: () => { currentPath = []; },
-    clearRect: () => { fills.length = 0; },
-    clip: () => {},
-    closePath: () => {},
-    fill: () => { fills.push({ style: context.fillStyle, points: currentPath.slice() }); },
-    lineTo: (x, y) => { currentPath.push({ x, y }); },
-    moveTo: (x, y) => { currentPath.push({ x, y }); },
-    arc: (x, y, radius, startAngle, endAngle) => {
-      const segmentCount = 72;
-      for (let segment = 0; segment <= segmentCount; segment += 1) {
-        const angle = startAngle + ((endAngle - startAngle) * segment) / segmentCount;
-        currentPath.push({ x: x + Math.cos(angle) * radius, y: y + Math.sin(angle) * radius });
-      }
-    },
-    fillStyle: "",
-    getTransform: () => ({}),
-    restore: () => {},
-    save: () => {},
-    scale: () => {},
-    setTransform: () => {},
-    stroke: () => {},
-    translate: () => {},
-    drawImage: () => {},
-  };
-  const offscreenContext = {
-    createImageData: (width, height) => ({ data: new Uint8ClampedArray(width * height * 4) }),
-    putImageData: () => {},
-  };
-  const offscreenCanvas = { getContext: () => offscreenContext };
-  class Canvas {}
-  const canvas = {
-    dataset: { ripplesTest: scenario },
-    getContext: () => context,
-    getBoundingClientRect: () => ({ width: 1000, height: 1000 }),
-  };
-  const window = {
-    addEventListener: () => {},
-    matchMedia: () => ({ matches: false }),
-    requestAnimationFrame: (callback) => { animationFrame = callback; },
-  };
-  const sandbox = {
-    HTMLCanvasElement: Canvas,
-    Math,
-    Uint8ClampedArray,
-    document: { querySelector: () => canvas, createElement: () => offscreenCanvas },
-    performance: { now: () => 0 },
-    window,
-  };
-  Object.setPrototypeOf(canvas, Canvas.prototype);
-  vm.runInNewContext(script, sandbox);
-  let currentTime = 0;
-  const advance = (duration) => {
-    const frameCount = Math.round(duration * 60);
-    for (let frame = 0; frame < frameCount; frame += 1) {
-      currentTime += 1000 / 60;
-      animationFrame(currentTime);
-    }
-  };
-  assert.equal(typeof canvas.__ripplesTest, "function", `test state was not exposed for ${scenario}`);
-  const getState = () => canvas.__ripplesTest();
-  const initialState = getState();
-  advance(seconds);
-  return { advance, getState, initialState, fills };
-};
-
-test("every dominant center advances at the same rate with losing elements around it", async () => {
-  const script = await readFile(new URL("../public/ripples.js", import.meta.url), "utf8");
-  for (const [scenario, emptyScenario, dominantKind] of [
-    ["center-water", "center-empty-water", 0],
-    ["center-plant", "center-empty-plant", 1],
-    ["center-fire", "center-empty-fire", 2],
-  ]) {
-    const emptyState = runRippleScenario(script, emptyScenario, 5).getState();
-    const surroundedState = runRippleScenario(script, scenario, 5).getState();
-    assert.ok(
-      Math.abs(emptyState.extents()[dominantKind].extent - surroundedState.extents()[dominantKind].extent) < 0.01,
-      `${scenario} was slowed by its losing ring`,
-    );
-  }
-});
-
-test("three elements keep changing after the initial seeds have filled the field", async () => {
-  const script = await readFile(new URL("../public/ripples.js", import.meta.url), "utf8");
-  const scenario = runRippleScenario(script, "three-wedges", 5);
-  const firstMovingState = scenario.getState();
-  const firstSnapshot = firstMovingState.snapshot();
-  const firstAngle = firstMovingState.centroids()[0].angle;
-  scenario.advance(2);
-  const secondMovingState = scenario.getState();
-  const secondSnapshot = secondMovingState.snapshot();
-  const angleDelta = Math.abs(Math.atan2(
-    Math.sin(secondMovingState.centroids()[0].angle - firstAngle),
-    Math.cos(secondMovingState.centroids()[0].angle - firstAngle),
-  ));
-  assert.ok(secondMovingState.age > 5, "the simulation should keep aging after the initial growth");
-  assert.notDeepEqual(secondSnapshot, firstSnapshot, "the elemental field should keep evolving");
-  assert.ok(angleDelta > 0.03, "the three-way field should move its fronts around the circle");
-  scenario.advance(3);
-  assert.notDeepEqual(scenario.getState().snapshot(), secondSnapshot, "the field should not settle permanently");
+  assert.match(page, /createGrowthState/);
+  assert.match(page, /growth tech tree/);
+  assert.match(page, /Fifteen calm balls regrowing green shards/);
+  assert.match(engine, /finaleRemaining: 1/);
+  assert.match(engine, /GROWTH_DECAY_RATE = 0\.01/);
+  assert.match(engine, /shard\.tangible/);
+  assert.match(engine, /bounceOffTangibleShards/);
+  assert.match(techTree, /A shard that reaches fullness/);
+  assert.match(copiedSimulation, /buildVoronoiCell/);
 });

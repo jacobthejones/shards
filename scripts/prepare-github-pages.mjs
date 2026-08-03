@@ -1,4 +1,4 @@
-import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import { readdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { rewriteProjectSiteAssetReferences } from "./github-pages-assets.mjs";
 
@@ -28,12 +28,3 @@ for (const filePath of await collectFiles(outputRoot)) {
 
   if (rewritten !== source) await writeFile(filePath, rewritten);
 }
-
-// The ripple prototype is intentionally a standalone static surface. Its
-// canvas script does not need the app router, and leaving the hydration shell
-// in place makes GitHub Pages try to reconcile the project-site path.
-const rippleRouteDirectory = path.join(outputRoot, "ripples");
-await mkdir(rippleRouteDirectory, { recursive: true });
-const standaloneRippleHtml = (await readFile(path.resolve("scripts/ripples-standalone.html"), "utf8"))
-  .replaceAll("__ASSET_VERSION__", assetVersion);
-await writeFile(path.join(rippleRouteDirectory, "index.html"), standaloneRippleHtml);
