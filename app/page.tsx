@@ -3,6 +3,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
+  CAMERA_VIEW_SCALE,
+  cameraScaleFor,
+  fieldBoundaryRadiusFor,
+  maxViewRadiusForFieldCircle,
+  playableViewportFor,
+} from "./camera";
+import {
   BASE_BALL_RADIUS,
   CORROSIVE_WAKE_DURATION_SECONDS,
   INITIAL_VIEW_RADIUS,
@@ -250,6 +257,10 @@ const createRenderSimulation = (): Simulation => ({
 
 export default function Home() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const gameTopbarRef = useRef<HTMLDivElement | null>(null);
+  const gameStateRef = useRef<HTMLDivElement | null>(null);
+  const bottomHudRef = useRef<HTMLDivElement | null>(null);
+  const cornerNoteRef = useRef<HTMLDivElement | null>(null);
   const simRef = useRef<Simulation | null>(null);
   const commandHandlerRef = useRef<(command: InteractiveWorkerCommand) => void>(() => {});
   const awaitingStartRef = useRef(true);
@@ -405,6 +416,7 @@ export default function Home() {
     let width = 0;
     let height = 0;
     let dpr = 1;
+    let playableViewport = playableViewportFor(1, 1, 0, 0);
     let frame = 0;
     let lastTime = performance.now();
     let hudTime = lastTime;
@@ -429,6 +441,8 @@ export default function Home() {
     let cachedBounds: ReturnType<typeof emptyRegionBounds> | null = null;
     let cachedBoundsBrokenCount = -1;
     let cachedBoundsFieldSeed = Number.NaN;
+    let cachedFieldBoundaryRadius = 0;
+    let cachedFieldBoundarySeed = Number.NaN;
     let pendingWorkerCommand: {
       type: PendingWorkerCommandType;
       targetCount?: number;
@@ -440,6 +454,15 @@ export default function Home() {
       dpr = Math.min(window.devicePixelRatio || 1, 2);
       width = Math.max(1, bounds.width);
       height = Math.max(1, bounds.height);
+      const topUiBottom = Math.max(
+        gameTopbarRef.current?.getBoundingClientRect().bottom ?? 0,
+        gameStateRef.current?.getBoundingClientRect().bottom ?? 0,
+      );
+      const bottomUiTop = Math.min(
+        bottomHudRef.current?.getBoundingClientRect().top ?? height,
+        cornerNoteRef.current?.getBoundingClientRect().top ?? height,
+      );
+      playableViewport = playableViewportFor(width, height, topUiBottom, height - bottomUiTop);
       canvas.width = Math.floor(width * dpr);
       canvas.height = Math.floor(height * dpr);
       context.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -448,7 +471,7 @@ export default function Home() {
     };
 
     const updateCamera = (elapsedSeconds: number) => {
-      const minimumDimension = Math.min(width, height);
+      const minimumDimension = playableViewport.minimumDimension;
       if (minimumDimension <= 0) return;
 
       if (!cachedBounds || cachedBoundsBrokenCount !== sim.broken.size || cachedBoundsFieldSeed !== sim.fieldSeed) {
@@ -456,16 +479,22 @@ export default function Home() {
         cachedBoundsBrokenCount = sim.broken.size;
         cachedBoundsFieldSeed = sim.fieldSeed;
       }
+      if (cachedFieldBoundarySeed !== sim.fieldSeed || cachedFieldBoundaryRadius <= 0) {
+        cachedFieldBoundaryRadius = fieldBoundaryRadiusFor(sim.shards.values());
+        cachedFieldBoundarySeed = sim.fieldSeed;
+      }
       const bounds = cachedBounds;
       const horizontalBoundary = width * (0.5 - VIEWPORT_BORDER_INSET);
-      const verticalBoundary = height * (0.5 - VIEWPORT_BORDER_INSET);
-      const targetViewRadius = Math.max(
+      const verticalBoundary = playableViewport.height * (0.5 - VIEWPORT_BORDER_INSET);
+      const targetViewRadiusBeforeFieldLimit = Math.max(
         INITIAL_VIEW_RADIUS,
-        Math.abs(bounds.minX) * minimumDimension / (horizontalBoundary * 2.15),
-        Math.abs(bounds.maxX) * minimumDimension / (horizontalBoundary * 2.15),
-        Math.abs(bounds.minY) * minimumDimension / (verticalBoundary * 2.15),
-        Math.abs(bounds.maxY) * minimumDimension / (verticalBoundary * 2.15),
+        Math.abs(bounds.minX) * minimumDimension / (horizontalBoundary * CAMERA_VIEW_SCALE),
+        Math.abs(bounds.maxX) * minimumDimension / (horizontalBoundary * CAMERA_VIEW_SCALE),
+        Math.abs(bounds.minY) * minimumDimension / (verticalBoundary * CAMERA_VIEW_SCALE),
+        Math.abs(bounds.maxY) * minimumDimension / (verticalBoundary * CAMERA_VIEW_SCALE),
       );
+      const maxViewRadius = maxViewRadiusForFieldCircle(cachedFieldBoundaryRadius);
+      const targetViewRadius = Math.min(targetViewRadiusBeforeFieldLimit, maxViewRadius);
       if (targetViewRadius <= viewRadiusRef.current) return;
 
       const smoothing = 1 - Math.exp(-VIEW_ZOOM_RATE * elapsedSeconds);
@@ -717,9 +746,9 @@ export default function Home() {
       context.fillRect(0, 0, width, height);
 
       const visibleRadius = Number.isFinite(viewRadiusRef.current) ? viewRadiusRef.current : INITIAL_VIEW_RADIUS;
-      const scale = Math.min(width, height) / (visibleRadius * 2.15);
+      const scale = cameraScaleFor(playableViewport, visibleRadius);
       const centerX = width / 2;
-      const centerY = height / 2 + 4;
+      const centerY = (playableViewport.top + playableViewport.bottom) / 2;
       context.save();
       context.translate(centerX, centerY);
       context.scale(scale, scale);
@@ -1056,7 +1085,7 @@ export default function Home() {
     <main className="game-shell">
       <canvas ref={canvasRef} className="field-canvas" aria-label="Live shards Voronoi field" />
 
-      <div className="game-topbar">
+      <div className="game-topbar" ref={gameTopbarRef}>
         <div className="game-brand">
           <div className="brand-mark" aria-hidden="true"><span /><span /><span /></div>
           <div className="brand-copy">
@@ -1077,9 +1106,9 @@ export default function Home() {
         </div>
       </div>
 
-      <div className="game-state"><span className="live-dot" /><span>{hud.rate.toFixed(1)} breaks per min</span></div>
+      <div className="game-state" ref={gameStateRef}><span className="live-dot" /><span>{hud.rate.toFixed(1)} breaks per min</span></div>
 
-      <div className="bottom-hud">
+      <div className="bottom-hud" ref={bottomHudRef}>
         <div className="upgrade-dock" aria-label="Upgrades">
           <button
             className={`upgrade-card tech-tree-button ${techAvailable ? "available" : ""}`}
@@ -1097,7 +1126,7 @@ export default function Home() {
         </div>
       </div>
 
-      <div className="corner-note"><span>SPACE</span> pause &nbsp;·&nbsp; shards heal while untouched</div>
+      <div className="corner-note" ref={cornerNoteRef}><span>SPACE</span> pause &nbsp;·&nbsp; shards heal while untouched</div>
 
       {techTreeOpen && (
         <div className="tech-modal-backdrop" onClick={() => { setTechTreeOpen(false); setSelectedTechId(null); }}>
