@@ -91,16 +91,18 @@ const drawShard = (context: CanvasRenderingContext2D, shard: GrowthShard, finale
     return;
   }
 
-  if (shard.growth > 0) {
-    const alpha = 0.08 + shard.growth * 0.7;
-    context.fillStyle = shard.tangible
-      ? "hsla(143, 52%, 57%, 0.78)"
-      : `hsla(143, 48%, 50%, ${alpha})`;
+  if (shard.tangible) {
+    context.fillStyle = "hsla(143, 52%, 57%, 0.78)";
     context.fill();
-    context.strokeStyle = shard.tangible
-      ? "hsla(147, 70%, 76%, 0.82)"
-      : `hsla(147, 58%, 70%, ${0.12 + shard.growth * 0.56})`;
-    context.lineWidth = shard.tangible ? 0.028 : 0.015;
+    context.strokeStyle = "hsla(147, 70%, 76%, 0.82)";
+    context.lineWidth = 0.028;
+    context.stroke();
+    return;
+  }
+
+  if (shard.growing) {
+    context.strokeStyle = `hsla(147, 58%, 70%, ${0.18 + shard.growth * 0.64})`;
+    context.lineWidth = 0.015;
     context.stroke();
     return;
   }
@@ -187,25 +189,6 @@ export default function GrowthPage() {
         if (activeState.mode === "finale" && shard.key !== activeState.finalShardKey) return;
         drawShard(context, shard, activeState.mode === "finale");
       });
-
-      context.save();
-      context.lineCap = "round";
-      context.lineJoin = "round";
-      activeState.balls.forEach((ball) => {
-        if (ball.trail.length < 2) return;
-        for (let index = 1; index < ball.trail.length; index += 1) {
-          const previous = ball.trail[index - 1];
-          const current = ball.trail[index];
-          const strength = Math.max(0, 1 - current[2] / 2.4);
-          context.strokeStyle = `rgba(132, 213, 151, ${0.025 + strength * 0.17})`;
-          context.lineWidth = 0.035 + strength * 0.04;
-          context.beginPath();
-          context.moveTo(previous[0], previous[1]);
-          context.lineTo(current[0], current[1]);
-          context.stroke();
-        }
-      });
-      context.restore();
 
       activeState.balls.forEach((ball) => {
         context.save();
@@ -375,7 +358,7 @@ export default function GrowthPage() {
       </header>
 
       <div style={{ position: "absolute", zIndex: 2, top: 100, left: 32, ...labelStyle, pointerEvents: "none" }}>
-        {mode === "finale" ? "A normal run is one second from its final break" : "Incomplete green shards fade by 1% each second"}
+        {mode === "finale" ? "A normal run is one second from its final break" : "A shard begins growing when a ball leaves it · 1% per second"}
       </div>
 
       <div style={{ position: "absolute", zIndex: 2, right: 32, bottom: 28, display: "flex", alignItems: "center", gap: 18, pointerEvents: "auto" }}>
@@ -391,7 +374,7 @@ export default function GrowthPage() {
       </div>
 
       <div style={{ position: "absolute", zIndex: 2, bottom: 28, left: 32, ...labelStyle, pointerEvents: "none" }}>
-        <span style={{ color: "rgba(155, 217, 169, 0.72)" }}>GREEN</span> growth settles at 100% · balls add health, never damage
+        <span style={{ color: "rgba(155, 217, 169, 0.72)" }}>GREEN</span> borders begin after a ball leaves · completed shards become solid
       </div>
 
       {techTreeOpen && mode === "growth" && (

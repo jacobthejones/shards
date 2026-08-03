@@ -21,6 +21,7 @@ export type GrowthBall = {
 
 export type GrowthShard = Shard & {
   growth: number;
+  growthPending: boolean;
   tangible: boolean;
 };
 
@@ -42,8 +43,7 @@ export type GrowthState = {
   nextCompletionAt: number;
 };
 
-export const GROWTH_DECAY_RATE = 0.01;
-export const GROWTH_DEPOSIT_RATE = 0.72;
+export const GROWTH_RATE = 0.01;
 export const GROWTH_FIELD_RADIUS = 7.4;
 export const BALL_SPEED = INITIAL_BALL_SPEED;
 export const BALL_RADIUS = BASE_BALL_RADIUS;
@@ -135,6 +135,7 @@ const makeShards = (fieldSeed: number): Map<string, GrowthShard> => {
         maxHealth: 1,
         healthUpdatedAt: 0,
         growth: 0,
+        growthPending: false,
         growing: false,
         tangible: false,
         boundaryEdges: [],
@@ -186,6 +187,7 @@ const fieldFromStaticShards = (staticShards: StaticShardState[]) => {
     maxHealth: 1,
     healthUpdatedAt: 0,
     growth: 0,
+    growthPending: false,
     growing: false,
     tangible: false,
     impacts: [],
@@ -314,26 +316,130 @@ const addTrailPoint = (ball: GrowthBall, age: number) => {
   while (ball.trail.length > 2 && ball.trail[0][2] > TRAIL_SECONDS) ball.trail.shift();
 };
 
-const growAtBall = (state: GrowthState, ball: GrowthBall, delta: number) => {
+const segmentsIntersect = (
+  firstAx: number,
+  firstAy: number,
+  firstBx: number,
+  firstBy: number,
+  secondAx: number,
+  secondAy: number,
+  secondBx: number,
+  secondBy: number,
+) => {
+  const orientation = (ax: number, ay: number, bx: number, by: number, cx: number, cy: number) => {
+    return (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
+  };
+  const onSegment = (ax: number, ay: number, bx: number, by: number, cx: number, cy: number) => {
+    return bx <= Math.max(ax, cx) + 0.000001
+      && bx >= Math.min(ax, cx) - 0.000001
+      && by <= Math.max(ay, cy) + 0.000001
+      && by >= Math.min(ay, cy) - 0.000001;
+  };
+  const first = orientation(firstAx, firstAy, firstBx, firstBy, secondAx, secondAy);
+  const second = orientation(firstAx, firstAy, firstBx, firstBy, secondBx, secondBy);
+  const third = orientation(secondAx, secondAy, secondBx, secondBy, firstAx, firstAy);
+  const fourth = orientation(secondAx, secondAy, secondBx, secondBy, firstBx, firstBy);
+  const firstOpposite = (first > 0.000001 && second < -0.000001) || (first < -0.000001 && second > 0.000001);
+  const secondOpposite = (third > 0.000001 && fourth < -0.000001) || (third < -0.000001 && fourth > 0.000001);
+  if (firstOpposite && secondOpposite) return true;
+  if (Math.abs(first) <= 0.000001 && onSegment(firstAx, firstAy, secondAx, secondAy, firstBx, firstBy)) return true;
+  if (Math.abs(second) <= 0.000001 && onSegment(firstAx, firstAy, secondBx, secondBy, firstBx, firstBy)) return true;
+  if (Math.abs(third) <= 0.000001 && onSegment(secondAx, secondAy, firstAx, firstAy, secondBx, secondBy)) return true;
+  return Math.abs(fourth) <= 0.000001 && onSegment(secondAx, secondAy, firstBx, firstBy, secondBx, secondBy);
+};
+
+const segmentDistance = (
+  firstAx: number,
+  firstAy: number,
+  firstBx: number,
+  firstBy: number,
+  secondAx: number,
+  secondAy: number,
+  secondBx: number,
+  secondBy: number,
+) => {
+  if (segmentsIntersect(firstAx, firstAy, firstBx, firstBy, secondAx, secondAy, secondBx, secondBy)) return 0;
+  return Math.min(
+    distanceToSegment(firstAx, firstAy, secondAx, secondAy, secondBx, secondBy).distance,
+    distanceToSegment(firstBx, firstBy, secondAx, secondAy, secondBx, secondBy).distance,
+    distanceToSegment(secondAx, secondAy, firstAx, firstAy, firstBx, firstBy).distance,
+    distanceToSegment(secondBx, secondBy, firstAx, firstAy, firstBx, firstBy).distance,
+  );
+};
+
+const segmentIntersectsPolygon = (
+  startX: number,
+  startY: number,
+  endX: number,
+  endY: number,
+  points: [number, number][],
+) => {
+  if (pointInPolygon(startX, startY, points) || pointInPolygon(endX, endY, points)) return true;
+  for (let index = 0; index < points.length; index += 1) {
+    const [ax, ay] = points[index];
+    const [bx, by] = points[(index + 1) % points.length];
+    if (segmentDistance(startX, startY, endX, endY, ax, ay, bx, by) <= BALL_RADIUS) return true;
+  }
+  return false;
+};
+
+const circleOverlapsShard = (x: number, y: number, shard: GrowthShard) => {
+  if (pointInPolygon(x, y, shard.points)) return true;
+  return nearestEdge(shard, x, y).distance <= BALL_RADIUS;
+};
+
+const beginGrowth = (shard: GrowthShard) => {
+  if (shard.tangible || shard.growing) return;
+  shard.growth = 0.5;
+  shard.growing = true;
+  shard.growthPending = false;
+};
+
+const resetGrowth = (shard: GrowthShard) => {
+  if (!shard.growing) return;
+  shard.growth = 0;
+  shard.growing = false;
+  shard.growthPending = false;
+};
+
+const processGrowthPath = (
+  state: GrowthState,
+  startX: number,
+  startY: number,
+  endX: number,
+  endY: number,
+) => {
   state.shards.forEach((shard) => {
-    if (shard.tangible || !pointInPolygon(ball.x, ball.y, shard.points)) return;
-    shard.growing = true;
-    shard.growth = Math.min(1, shard.growth + GROWTH_DEPOSIT_RATE * delta);
-    if (shard.growth >= 1) {
-      shard.growth = 1;
-      shard.tangible = true;
-      shard.growing = false;
-      state.growthCompletions += 1;
-      state.nextCompletionAt = state.time;
+    if (shard.tangible) return;
+    const pathIntersects = segmentIntersectsPolygon(startX, startY, endX, endY, shard.points);
+    if (shard.growing && pathIntersects) {
+      resetGrowth(shard);
+      return;
     }
+
+    const currentOverlaps = circleOverlapsShard(startX, startY, shard);
+    const endpointOverlaps = circleOverlapsShard(endX, endY, shard);
+    if (shard.growthPending) {
+      if (!currentOverlaps && (!pathIntersects || !endpointOverlaps)) beginGrowth(shard);
+      return;
+    }
+    if (!pathIntersects) return;
+    if (currentOverlaps || endpointOverlaps) shard.growthPending = true;
+    else beginGrowth(shard);
   });
 };
 
-const decayGrowth = (state: GrowthState, delta: number) => {
+const refreshGrowth = (state: GrowthState, delta: number) => {
   state.shards.forEach((shard) => {
-    if (shard.tangible || shard.growth <= 0) return;
-    shard.growth = Math.max(0, shard.growth - GROWTH_DECAY_RATE * delta);
-    if (shard.growth === 0) shard.growing = false;
+    if (!shard.growing) return;
+    shard.growth = Math.min(1, shard.growth + GROWTH_RATE * delta);
+    if (shard.growth < 1) return;
+    shard.growth = 0;
+    shard.growing = false;
+    shard.growthPending = false;
+    shard.tangible = true;
+    state.growthCompletions += 1;
+    state.nextCompletionAt = state.time;
   });
 };
 
@@ -343,12 +449,14 @@ export const enterGrowthMode = (state: GrowthState) => {
   const finalShard = state.shards.get(state.finalShardKey);
   if (finalShard) {
     finalShard.growth = 0;
+    finalShard.growthPending = false;
     finalShard.health = 1;
     finalShard.growing = false;
     finalShard.tangible = false;
   }
   state.shards.forEach((shard) => {
     shard.growth = 0;
+    shard.growthPending = false;
     shard.health = 1;
     shard.growing = false;
     shard.tangible = false;
@@ -360,12 +468,14 @@ export const stepGrowthState = (state: GrowthState, elapsedSeconds: number) => {
   if (delta === 0) return;
   state.time += delta;
   state.balls.forEach((ball) => {
+    const startX = ball.x;
+    const startY = ball.y;
     ball.x += ball.vx * delta;
     ball.y += ball.vy * delta;
     bounceOffField(ball, state);
     if (state.mode === "growth") bounceOffTangibleShards(state, ball);
     addTrailPoint(ball, delta);
-    if (state.mode === "growth") growAtBall(state, ball, delta);
+    if (state.mode === "growth") processGrowthPath(state, startX, startY, ball.x, ball.y);
   });
 
   if (state.mode === "finale") {
@@ -373,5 +483,5 @@ export const stepGrowthState = (state: GrowthState, elapsedSeconds: number) => {
     if (state.finaleRemaining === 0) enterGrowthMode(state);
     return;
   }
-  decayGrowth(state, delta);
+  refreshGrowth(state, delta);
 };

@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
-  GROWTH_DECAY_RATE,
+  GROWTH_RATE,
   createGrowthState,
   enterGrowthMode,
   stepGrowthState,
@@ -75,39 +75,74 @@ test("the jagged boundary does not pull interior balls to a corner", () => {
   assert.ok(Math.hypot(ball.x, ball.y) < 2);
 });
 
-test("incomplete growth decays at one percent per second", () => {
+test("a shard starts growing only after the ball leaves it", () => {
+  const state = createGrowthState();
+  enterGrowthMode(state);
+  const shard = state.shards.get(state.finalShardKey);
+  assert.ok(shard);
+
+  state.balls.forEach((ball) => {
+    ball.x = 0;
+    ball.y = 7;
+    ball.vx = 0;
+    ball.vy = 0;
+  });
+  const ball = state.balls[0];
+  state.balls = [ball];
+  ball.x = shard.sx;
+  ball.y = shard.sy;
+  ball.vx = 1.4;
+  ball.vy = 0;
+
+  stepGrowthState(state, 0.05);
+
+  assert.equal(shard.growth, 0);
+  assert.equal(shard.growing, false);
+  assert.equal(shard.growthPending, true);
+
+  for (let index = 0; index < 20; index += 1) stepGrowthState(state, 0.05);
+
+  assert.equal(shard.growing, true);
+  assert.ok(shard.growth >= 0.5);
+});
+
+test("growing shards advance at one percent per second", () => {
   const state = createGrowthState();
   enterGrowthMode(state);
   const shard = state.shards.get(state.finalShardKey);
   assert.ok(shard);
   shard.growth = 0.5;
+  shard.growing = true;
   state.balls.forEach((ball) => {
     ball.x = 0;
-    ball.y = 7.2;
+    ball.y = 7;
     ball.vx = 0;
     ball.vy = 0;
   });
 
   for (let index = 0; index < 20; index += 1) stepGrowthState(state, 0.05);
 
-  assert.ok(Math.abs(shard.growth - (0.5 - GROWTH_DECAY_RATE)) < 0.000001);
+  assert.ok(Math.abs(shard.growth - (0.5 + GROWTH_RATE)) < 0.000001);
 });
 
-test("a ball passing over a growing shard adds health until it becomes tangible", () => {
+test("a growing shard becomes tangible at full growth", () => {
   const state = createGrowthState();
   enterGrowthMode(state);
   const shard = state.shards.get(state.finalShardKey);
   assert.ok(shard);
-  const ball = state.balls[0];
-  ball.x = shard.sx;
-  ball.y = shard.sy;
-  ball.vx = 0;
-  ball.vy = 0;
   shard.growth = 0.99;
+  shard.growing = true;
+  state.balls.forEach((ball) => {
+    ball.x = 0;
+    ball.y = 7;
+    ball.vx = 0;
+    ball.vy = 0;
+  });
 
-  stepGrowthState(state, 0.05);
+  for (let index = 0; index < 21; index += 1) stepGrowthState(state, 0.05);
 
-  assert.equal(shard.growth, 1);
+  assert.equal(shard.growth, 0);
+  assert.equal(shard.growing, false);
   assert.equal(shard.tangible, true);
   assert.equal(state.growthCompletions, 1);
 });
