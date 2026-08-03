@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type CSSProperties } from "react";
 
 type Point = {
   x: number;
@@ -25,165 +25,105 @@ const PASTEL_HUES = [
   204, 226, 248, 272, 298, 326, 348,
 ];
 
-const RIPPLE_STYLES = `
-  .ripples-shell {
-    position: fixed;
-    inset: 0;
-    overflow: hidden;
-    isolation: isolate;
-    background:
-      radial-gradient(circle at 50% 48%, rgba(29, 62, 68, 0.28), transparent 45%),
-      radial-gradient(circle at 50% 50%, #11242b 0%, #09171f 58%, #061018 100%);
-    color: #f0f4e9;
-  }
+const shellStyle: CSSProperties = {
+  position: "fixed",
+  inset: 0,
+  overflow: "hidden",
+  isolation: "isolate",
+  background: "radial-gradient(circle at 50% 48%, rgba(29, 62, 68, 0.28), transparent 45%), radial-gradient(circle at 50% 50%, #11242b 0%, #09171f 58%, #061018 100%)",
+  color: "#f0f4e9",
+};
 
-  .ripples-shell::before,
-  .ripples-shell::after {
-    position: absolute;
-    z-index: 1;
-    inset: 0;
-    pointer-events: none;
-    content: "";
-  }
+const canvasStyle: CSSProperties = {
+  position: "absolute",
+  zIndex: 0,
+  inset: 0,
+  display: "block",
+  width: "100%",
+  height: "100%",
+};
 
-  .ripples-shell::before {
-    background: radial-gradient(circle at center, transparent 35%, rgba(1, 7, 11, 0.42) 100%);
-  }
+const overlayStyle: CSSProperties = {
+  position: "absolute",
+  zIndex: 1,
+  inset: 0,
+  pointerEvents: "none",
+};
 
-  .ripples-shell::after {
-    background:
-      linear-gradient(180deg, rgba(3, 10, 15, 0.52), transparent 20%, transparent 79%, rgba(3, 10, 15, 0.65)),
-      linear-gradient(90deg, rgba(3, 10, 15, 0.18), transparent 24%, transparent 76%, rgba(3, 10, 15, 0.18));
-  }
+const topbarStyle: CSSProperties = {
+  position: "absolute",
+  zIndex: 2,
+  top: 0,
+  right: 0,
+  left: 0,
+  display: "flex",
+  alignItems: "flex-start",
+  justifyContent: "space-between",
+  padding: "28px 32px",
+  pointerEvents: "none",
+};
 
-  .ripples-canvas {
-    position: absolute;
-    z-index: 0;
-    inset: 0;
-    display: block;
-    width: 100%;
-    height: 100%;
-  }
+const brandStyle: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 13,
+};
 
-  .ripples-topbar,
-  .ripples-bottom-note {
-    position: absolute;
-    z-index: 2;
-    pointer-events: none;
-  }
+const markStyle: CSSProperties = {
+  position: "relative",
+  width: 26,
+  height: 26,
+  transform: "rotate(45deg)",
+};
 
-  .ripples-topbar {
-    top: 0;
-    right: 0;
-    left: 0;
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    padding: 28px 32px;
-  }
+const markSpanStyle: CSSProperties = {
+  position: "absolute",
+  display: "block",
+  border: "1px solid #efd38c",
+  borderRadius: 2,
+  transform: "rotate(45deg)",
+};
 
-  .ripples-brand {
-    display: flex;
-    align-items: center;
-    gap: 13px;
-  }
+const copyStyle: CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  gap: 5,
+};
 
-  .ripples-mark {
-    position: relative;
-    width: 26px;
-    height: 26px;
-    transform: rotate(45deg);
-  }
+const labelStyle: CSSProperties = {
+  color: "rgba(201, 223, 215, 0.54)",
+  fontSize: 9,
+  letterSpacing: "0.16em",
+  textTransform: "uppercase",
+};
 
-  .ripples-mark span {
-    position: absolute;
-    display: block;
-    border: 1px solid #efd38c;
-    border-radius: 2px;
-    transform: rotate(45deg);
-  }
+const topNoteStyle: CSSProperties = {
+  ...labelStyle,
+  paddingTop: 5,
+  textAlign: "right",
+};
 
-  .ripples-mark span:nth-child(1) { inset: 7px; }
-  .ripples-mark span:nth-child(2) { inset: 3px; opacity: 0.42; }
-  .ripples-mark span:nth-child(3) { inset: 11px; border-color: #d9b7ed; }
+const bottomNoteStyle: CSSProperties = {
+  ...labelStyle,
+  position: "absolute",
+  zIndex: 2,
+  bottom: 28,
+  left: 32,
+  pointerEvents: "none",
+};
 
-  .ripples-copy {
-    display: flex;
-    flex-direction: column;
-    gap: 5px;
-  }
-
-  .ripples-copy strong {
-    color: #f4f4e9;
-    font-size: 13px;
-    font-weight: 600;
-    letter-spacing: 0.3em;
-  }
-
-  .ripples-copy span,
-  .ripples-top-note,
-  .ripples-bottom-note {
-    color: rgba(201, 223, 215, 0.54);
-    font-size: 9px;
-    letter-spacing: 0.16em;
-    text-transform: uppercase;
-  }
-
-  .ripples-top-note {
-    padding-top: 5px;
-    text-align: right;
-  }
-
-  .ripples-back {
-    position: absolute;
-    right: 32px;
-    bottom: 28px;
-    z-index: 3;
-    color: rgba(201, 223, 215, 0.54);
-    font-size: 9px;
-    letter-spacing: 0.16em;
-    pointer-events: auto;
-    text-decoration: none;
-    text-transform: uppercase;
-    transition: color 160ms ease;
-  }
-
-  .ripples-back:hover,
-  .ripples-back:focus-visible {
-    color: #f1dda5;
-  }
-
-  .ripples-bottom-note {
-    bottom: 28px;
-    left: 32px;
-  }
-
-  @media (max-width: 640px) {
-    .ripples-topbar {
-      padding: 22px 20px;
-    }
-
-    .ripples-top-note {
-      display: none;
-    }
-
-    .ripples-bottom-note {
-      bottom: 22px;
-      left: 20px;
-    }
-
-    .ripples-back {
-      right: 20px;
-      bottom: 22px;
-    }
-  }
-
-  @media (prefers-reduced-motion: reduce) {
-    .ripples-back {
-      transition: none;
-    }
-  }
-`;
+const backStyle: CSSProperties = {
+  position: "absolute",
+  right: 32,
+  bottom: 28,
+  zIndex: 3,
+  color: "rgba(201, 223, 215, 0.54)",
+  fontSize: 9,
+  letterSpacing: "0.16em",
+  pointerEvents: "auto",
+  textDecoration: "none",
+  textTransform: "uppercase",
+};
 
 const distanceSquared = (first: Point, second: Point) => {
   const dx = first.x - second.x;
@@ -477,21 +417,26 @@ export default function Ripples() {
   }, []);
 
   return (
-    <main className="ripples-shell">
-      <style>{RIPPLE_STYLES}</style>
-      <canvas ref={canvasRef} className="ripples-canvas" aria-label="Fifteen pastel light sources sending out expanding ripples" />
-      <header className="ripples-topbar">
-        <div className="ripples-brand">
-          <div className="ripples-mark" aria-hidden="true"><span /><span /><span /></div>
-          <div className="ripples-copy">
-            <strong>RIPPLES</strong>
-            <span>AFTER THE FIELD / 15 SOURCES</span>
+    <main style={shellStyle}>
+      <canvas ref={canvasRef} style={canvasStyle} aria-label="Fifteen pastel light sources sending out expanding ripples" />
+      <div aria-hidden="true" style={{ ...overlayStyle, background: "radial-gradient(circle at center, transparent 35%, rgba(1, 7, 11, 0.42) 100%)" }} />
+      <div aria-hidden="true" style={{ ...overlayStyle, background: "linear-gradient(180deg, rgba(3, 10, 15, 0.52), transparent 20%, transparent 79%, rgba(3, 10, 15, 0.65)), linear-gradient(90deg, rgba(3, 10, 15, 0.18), transparent 24%, transparent 76%, rgba(3, 10, 15, 0.18))" }} />
+      <header style={topbarStyle}>
+        <div style={brandStyle}>
+          <div style={markStyle} aria-hidden="true">
+            <span style={{ ...markSpanStyle, inset: 7 }} />
+            <span style={{ ...markSpanStyle, inset: 3, opacity: 0.42 }} />
+            <span style={{ ...markSpanStyle, inset: 11, borderColor: "#d9b7ed" }} />
+          </div>
+          <div style={copyStyle}>
+            <strong style={{ color: "#f4f4e9", fontSize: 13, fontWeight: 600, letterSpacing: "0.3em" }}>RIPPLES</strong>
+            <span style={labelStyle}>AFTER THE FIELD / 15 SOURCES</span>
           </div>
         </div>
-        <div className="ripples-top-note">A quiet geometry of light</div>
+        <div style={topNoteStyle}>A quiet geometry of light</div>
       </header>
-      <div className="ripples-bottom-note">WAVEFRONTS / SHARED BOUNDARIES</div>
-      <a className="ripples-back" href="../">BACK TO SHARDS</a>
+      <div style={bottomNoteStyle}>WAVEFRONTS / SHARED BOUNDARIES</div>
+      <a style={backStyle} href="../">BACK TO SHARDS</a>
     </main>
   );
 }
