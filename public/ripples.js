@@ -130,6 +130,7 @@
       for (let otherIndex = 0; otherIndex < sources.length && region.length > 0; otherIndex += 1) {
         if (otherIndex === sourceIndex) continue;
         const other = sources[otherIndex];
+        if (source.kind === other.kind || beats(source.kind, other.kind)) continue;
         const normalX = 2 * (other.x - source.x);
         const normalY = 2 * (other.y - source.y);
         const limit = other.x * other.x + other.y * other.y
