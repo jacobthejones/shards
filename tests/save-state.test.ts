@@ -27,6 +27,7 @@ const makeSimulation = (): Simulation => ({
       healthUpdatedAt: 3,
       growth: 0.42,
       growing: true,
+      boundaryEdges: [],
       impacts: [{ id: 4, x: 0.5, y: 0, inwardX: -1, inwardY: 0, strength: 0.4 }],
       hue: 188,
       seed: 0.5,

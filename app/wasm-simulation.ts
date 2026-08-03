@@ -10,7 +10,7 @@ import {
 import type { SaveState } from "./save-state";
 import { TECH_IDS, type TechId } from "./tech-tree";
 
-export const WASM_RUNTIME_VERSION = 6;
+export const WASM_RUNTIME_VERSION = 7;
 
 type WasmExports = {
   initialize_real_simulation: (seed: number, fieldSeed: number, balls: number) => void;
@@ -64,6 +64,7 @@ type WasmExports = {
   get_shard_point_x: (shard: number, point: number) => number;
   get_shard_point_y: (shard: number, point: number) => number;
   is_shard_broken: (index: number) => number;
+  is_shard_boundary_edge: (shard: number, edge: number) => number;
   get_shard_health: (index: number) => number;
   get_shard_health_updated_at: (index: number) => number;
   get_shard_growth: (index: number) => number;
@@ -154,6 +155,9 @@ export class WasmSimulation {
         this.wasm.get_shard_point_x(index, pointIndex),
         this.wasm.get_shard_point_y(index, pointIndex),
       ] as [number, number]);
+      const boundaryEdges = points.flatMap((point, pointIndex) => this.wasm.is_shard_boundary_edge(index, pointIndex)
+        ? [[point, points[(pointIndex + 1) % points.length]] as [[number, number], [number, number]]]
+        : []);
       const shard: StaticShardState = {
         key: keyFor(gx, gy),
         gx,
@@ -164,6 +168,7 @@ export class WasmSimulation {
         hue: this.wasm.get_shard_hue(index),
         seed: this.wasm.get_shard_seed(index),
         fieldSeed: this.wasm.get_field_seed(),
+        boundaryEdges,
       };
       this.staticShards.push(shard);
       this.shardIndexByKey.set(shard.key, index);

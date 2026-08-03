@@ -10,11 +10,14 @@ export type Shard = {
   healthUpdatedAt: number;
   growth: number;
   growing: boolean;
+  boundaryEdges: ShardBoundaryEdge[];
   impacts: ShardImpact[];
   hue: number;
   seed: number;
   fieldSeed: number;
 };
+
+export type ShardBoundaryEdge = [[number, number], [number, number]];
 
 export type ShardImpact = {
   id: number;
@@ -81,7 +84,7 @@ export type SimulationEvent = {
   sourceShardKey?: string;
 };
 
-export type StaticShardState = Pick<Shard, "key" | "gx" | "gy" | "sx" | "sy" | "points" | "hue" | "seed" | "fieldSeed">;
+export type StaticShardState = Pick<Shard, "key" | "gx" | "gy" | "sx" | "sy" | "points" | "hue" | "seed" | "fieldSeed" | "boundaryEdges">;
 
 export type DynamicShardState = Pick<Shard, "key" | "health" | "maxHealth" | "healthUpdatedAt" | "growth" | "growing" | "impacts">;
 

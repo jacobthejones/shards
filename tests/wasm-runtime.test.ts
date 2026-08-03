@@ -35,6 +35,121 @@ test("the shipped C++ runtime initializes a contiguous Voronoi field", async () 
   assert.equal(wasm.get_simulation_runtime_version(), WASM_RUNTIME_VERSION);
 });
 
+test("the permanent boundary follows every exposed Voronoi edge", async () => {
+  const wasm = await loadRuntime();
+  wasm.initialize_real_simulation(1234, 5678, 1);
+  const shardCount = wasm.get_shard_count();
+  const edgeCounts = new Map<string, { count: number; boundaryFlags: number }>();
+  const pointKey = (x: number, y: number) => `${Math.round(x * 100_000)},${Math.round(y * 100_000)}`;
+  for (let shard = 0; shard < shardCount; shard += 1) {
+    const pointCount = wasm.get_shard_point_count(shard);
+    for (let edge = 0; edge < pointCount; edge += 1) {
+      const next = (edge + 1) % pointCount;
+      const first = pointKey(wasm.get_shard_point_x(shard, edge), wasm.get_shard_point_y(shard, edge));
+      const second = pointKey(wasm.get_shard_point_x(shard, next), wasm.get_shard_point_y(shard, next));
+      const key = first < second ? `${first}|${second}` : `${second}|${first}`;
+      const existing = edgeCounts.get(key) ?? { count: 0, boundaryFlags: 0 };
+      existing.count += 1;
+      existing.boundaryFlags += wasm.is_shard_boundary_edge(shard, edge);
+      edgeCounts.set(key, existing);
+    }
+  }
+
+  let exposedEdges = 0;
+  let sharedEdges = 0;
+  const boundaryVertexDegrees = new Map<string, number>();
+  edgeCounts.forEach(({ count, boundaryFlags }, key) => {
+    assert.ok(count === 1 || count === 2, "every Voronoi edge should be exposed or shared by exactly two shards");
+    if (count === 1) {
+      exposedEdges += 1;
+      assert.equal(boundaryFlags, 1);
+      key.split("|").forEach((point) => boundaryVertexDegrees.set(point, (boundaryVertexDegrees.get(point) ?? 0) + 1));
+    } else {
+      sharedEdges += 1;
+      assert.equal(boundaryFlags, 0);
+    }
+  });
+  assert.ok(exposedEdges > 100);
+  assert.ok(sharedEdges > exposedEdges);
+  boundaryVertexDegrees.forEach((degree) => assert.equal(degree, 2, "the gold boundary must form a closed perimeter"));
+
+  wasm.set_all_shards_broken(1);
+  for (let shard = 0; shard < shardCount; shard += 1) assert.equal(wasm.is_shard_broken(shard), 1);
+});
+
+test("the permanent boundary reflects balls after every shard is broken", async () => {
+  const wasm = await loadRuntime();
+  wasm.initialize_real_simulation(1234, 5678, 1);
+  wasm.set_all_shards_broken(1);
+
+  let boundary: { shard: number; ax: number; ay: number; bx: number; by: number } | undefined;
+  for (let shard = 0; shard < wasm.get_shard_count() && !boundary; shard += 1) {
+    const pointCount = wasm.get_shard_point_count(shard);
+    for (let edge = 0; edge < pointCount; edge += 1) {
+      if (!wasm.is_shard_boundary_edge(shard, edge)) continue;
+      const next = (edge + 1) % pointCount;
+      const candidate = {
+        shard,
+        ax: wasm.get_shard_point_x(shard, edge),
+        ay: wasm.get_shard_point_y(shard, edge),
+        bx: wasm.get_shard_point_x(shard, next),
+        by: wasm.get_shard_point_y(shard, next),
+      };
+      if (Math.hypot(candidate.bx - candidate.ax, candidate.by - candidate.ay) > 0.4) boundary = candidate;
+    }
+  }
+  assert.ok(boundary);
+
+  const edgeX = boundary.bx - boundary.ax;
+  const edgeY = boundary.by - boundary.ay;
+  const edgeLength = Math.hypot(edgeX, edgeY);
+  const midpointX = (boundary.ax + boundary.bx) / 2;
+  const midpointY = (boundary.ay + boundary.by) / 2;
+  let inwardX = -edgeY / edgeLength;
+  let inwardY = edgeX / edgeLength;
+  if (inwardX * (wasm.get_shard_sx(boundary.shard) - midpointX)
+    + inwardY * (wasm.get_shard_sy(boundary.shard) - midpointY) < 0) {
+    inwardX = -inwardX;
+    inwardY = -inwardY;
+  }
+  const radius = 0.095;
+  const speed = 1.4366976021418008;
+  wasm.set_ball_state(
+    0,
+    midpointX + inwardX * (radius + 0.015),
+    midpointY + inwardY * (radius + 0.015),
+    -inwardX * speed,
+    -inwardY * speed,
+    0,
+  );
+  wasm.step_real_simulation(1);
+
+  assert.equal(wasm.get_event_count(), 1);
+  assert.equal(wasm.get_event_type(0), 1);
+  assert.ok(wasm.get_ball_vx(0) * inwardX + wasm.get_ball_vy(0) * inwardY > 0);
+  const signedDistance = (wasm.get_ball_x(0) - boundary.ax) * inwardX
+    + (wasm.get_ball_y(0) - boundary.ay) * inwardY;
+  assert.ok(signedDistance > radius);
+  assert.equal(wasm.get_total_hits(), 0);
+  assert.equal(wasm.get_total_breaks(), 0);
+  for (let shard = 0; shard < wasm.get_shard_count(); shard += 1) assert.equal(wasm.is_shard_broken(shard), 1);
+});
+
+test("the permanent boundary contains many balls on a fully cleared field", async () => {
+  const wasm = await loadRuntime();
+  wasm.initialize_real_simulation(9876, 5432, 16);
+  wasm.set_all_shards_broken(1);
+
+  for (let interval = 0; interval < 60; interval += 1) {
+    wasm.step_real_simulation(600);
+    for (let ball = 0; ball < wasm.get_ball_count(); ball += 1) {
+      assert.ok(Math.hypot(wasm.get_ball_x(ball), wasm.get_ball_y(ball)) < 50);
+    }
+  }
+  assert.equal(wasm.get_total_hits(), 0);
+  assert.equal(wasm.get_total_breaks(), 0);
+});
+
 test("the C++ runtime preserves the fixed ball speed and upgrade cost", async () => {
   const wasm = await loadRuntime();
   wasm.initialize_real_simulation(42, 99, 1);
@@ -142,8 +257,8 @@ test("New Growth starts only when the chosen ball sweeps through an empty cell",
 
   wasm.set_ball_state(0, 100, 100, 0, 0, 0);
   wasm.step_real_simulation(60);
-  assert.ok(wasm.get_shard_growth(centerShard) > 0.519);
-  assert.ok(wasm.get_shard_growth(centerShard) < 0.522);
+  assert.ok(wasm.get_shard_growth(centerShard) > 0.509);
+  assert.ok(wasm.get_shard_growth(centerShard) < 0.512);
 
   wasm.step_real_simulation(6_000);
   assert.equal(wasm.is_shard_broken(centerShard), 0);

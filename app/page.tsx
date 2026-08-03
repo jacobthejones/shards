@@ -567,6 +567,34 @@ export default function Home() {
       targetContext.stroke(path);
     };
 
+    const drawBoundaryEdges = (targetContext: ChunkContext, shard: Shard) => {
+      if (shard.boundaryEdges.length === 0) return;
+      targetContext.save();
+      targetContext.strokeStyle = "hsla(43, 88%, 66%, 0.92)";
+      targetContext.lineWidth = 0.032;
+      targetContext.lineCap = "round";
+      shard.boundaryEdges.forEach(([[ax, ay], [bx, by]]) => {
+        const edgeX = bx - ax;
+        const edgeY = by - ay;
+        const length = Math.hypot(edgeX, edgeY);
+        if (length === 0) return;
+        let outwardX = -edgeY / length;
+        let outwardY = edgeX / length;
+        const midpointX = (ax + bx) / 2;
+        const midpointY = (ay + by) / 2;
+        if (outwardX * (shard.sx - midpointX) + outwardY * (shard.sy - midpointY) > 0) {
+          outwardX = -outwardX;
+          outwardY = -outwardY;
+        }
+        const offset = 0.024;
+        targetContext.beginPath();
+        targetContext.moveTo(ax + outwardX * offset, ay + outwardY * offset);
+        targetContext.lineTo(bx + outwardX * offset, by + outwardY * offset);
+        targetContext.stroke();
+      });
+      targetContext.restore();
+    };
+
     const drawGrowingShard = (targetContext: ChunkContext, shard: Shard) => {
       const growth = Math.max(0, Math.min(1, shard.growth));
       if (growth <= 0) return;
@@ -624,9 +652,10 @@ export default function Home() {
           shards.forEach((shard) => {
             if (sim.broken.has(shard.key)) {
               if (shard.growing) drawGrowingShard(chunk.context, shard);
-              return;
+            } else {
+              drawShard(chunk.context, shard, scale);
             }
-            drawShard(chunk.context, shard, scale);
+            drawBoundaryEdges(chunk.context, shard);
           });
         },
       );

@@ -89,6 +89,9 @@ test("keeps the prototype self-contained", async () => {
   assert.match(page, /TECH_TREE_BRANCHES/);
   assert.match(page, /sim\.unlockedTechs\.includes\(TECH_IDS\.CHOSEN_ONE\)/);
   assert.match(page, /#e1e8ec/);
+  assert.match(page, /drawBoundaryEdges/);
+  assert.match(page, /shard\.boundaryEdges/);
+  assert.match(page, /hsla\(43, 88%, 66%, 0\.92\)/);
   assert.match(page, /event\.type === "growth"/);
   assert.match(page, /event\.type === "growth-break"/);
   assert.match(page, /playGrowthBreakTone/);
@@ -127,7 +130,8 @@ test("keeps the prototype self-contained", async () => {
   assert.match(worker, /case "load"/);
   assert.match(worker, /case "setTech"/);
   assert.match(wasmSimulation, /simulation\.wasm\?v=\$\{WASM_RUNTIME_VERSION\}/);
-  assert.match(wasmSimulation, /WASM_RUNTIME_VERSION = 6/);
+  assert.match(wasmSimulation, /WASM_RUNTIME_VERSION = 7/);
+  assert.match(wasmSimulation, /is_shard_boundary_edge/);
   assert.match(wasmSimulation, /set_tech_chosen_one/);
   assert.match(wasmSimulation, /set_tech_new_growth/);
   assert.match(wasmSimulation, /get_shard_growth/);

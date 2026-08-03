@@ -21,7 +21,7 @@
 #define BASE_HIT_DAMAGE 0.2
 #define SHARD_REGENERATION_RATE 0.01
 #define SHARD_GROWTH_INITIAL 0.50
-#define SHARD_GROWTH_RATE 0.02
+#define SHARD_GROWTH_RATE 0.01
 #define HEALTH_EPSILON 0.000000001
 #define INITIAL_BALL_COST 300.0
 #define BALL_COST_GROWTH 1.2
@@ -33,7 +33,7 @@
 #define CONDUCTION_SPLASH_DAMAGE 0.05
 #define CHOSEN_ONE_DAMAGE_MULTIPLIER 5.0
 #define CHOSEN_BALL_INDEX 0
-#define SIMULATION_RUNTIME_VERSION 6
+#define SIMULATION_RUNTIME_VERSION 7
 #define BOUNCE_JITTER_RADIANS (0.02 * 3.1415926535897932384626433832795 / 180.0)
 #define COLLISION_SEPARATION 0.004
 #define MAX_COLLISIONS_PER_STEP 4
@@ -69,6 +69,7 @@ static int32_t SHARD_GROWTH_PENDING[MAX_SHARDS];
 static double SHARD_HUE[MAX_SHARDS];
 static double SHARD_SEED[MAX_SHARDS];
 static int32_t SHARD_BROKEN[MAX_SHARDS];
+static int32_t SHARD_BOUNDARY_EDGE[MAX_SHARDS * MAX_CELL_POINTS];
 static int32_t SHARD_IMPACT_COUNT[MAX_SHARDS];
 static double SHARD_IMPACT_STRENGTH[MAX_SHARDS * MAX_IMPACTS];
 static double SHARD_IMPACT_X[MAX_SHARDS * MAX_IMPACTS];
@@ -517,6 +518,40 @@ static int shared_edge_for_shards(
   return 0;
 }
 
+static int32_t edge_is_shared_with_field(int32_t shard, int32_t edge_index) {
+  int32_t start = shard * MAX_CELL_POINTS;
+  int32_t next = (edge_index + 1) % POINT_COUNT[shard];
+  double ax = POINT_X[start + edge_index];
+  double ay = POINT_Y[start + edge_index];
+  double bx = POINT_X[start + next];
+  double by = POINT_Y[start + next];
+  int32_t source_gx = SHARD_GX[shard];
+  int32_t source_gy = SHARD_GY[shard];
+
+  for (int32_t gy = source_gy - 4; gy <= source_gy + 4; gy += 1) {
+    for (int32_t gx = source_gx - 4; gx <= source_gx + 4; gx += 1) {
+      if (!in_grid(gx, gy)) continue;
+      int32_t candidate = GRID[grid_index(gx, gy)];
+      if (candidate < 0 || candidate == shard) continue;
+      int32_t candidate_start = candidate * MAX_CELL_POINTS;
+      int32_t candidate_count = POINT_COUNT[candidate];
+      for (int32_t candidate_index = 0; candidate_index < candidate_count; candidate_index += 1) {
+        int32_t candidate_next = (candidate_index + 1) % candidate_count;
+        double candidate_ax = POINT_X[candidate_start + candidate_index];
+        double candidate_ay = POINT_Y[candidate_start + candidate_index];
+        double candidate_bx = POINT_X[candidate_start + candidate_next];
+        double candidate_by = POINT_Y[candidate_start + candidate_next];
+        int32_t same_direction = points_close(ax, ay, candidate_ax, candidate_ay)
+          && points_close(bx, by, candidate_bx, candidate_by);
+        int32_t opposite_direction = points_close(ax, ay, candidate_bx, candidate_by)
+          && points_close(bx, by, candidate_ax, candidate_ay);
+        if (same_direction || opposite_direction) return 1;
+      }
+    }
+  }
+  return 0;
+}
+
 static int32_t contains_shard(const int32_t *shards, int32_t count, int32_t target) {
   for (int32_t index = 0; index < count; index += 1) {
     if (shards[index] == target) return 1;
@@ -640,6 +675,12 @@ static void initialize_field(double field_seed) {
       SHARD_DAMAGED[shard] = 0;
     }
   }
+  for (int32_t shard = 0; shard < shard_count; shard += 1) {
+    int32_t edge_start = shard * MAX_CELL_POINTS;
+    for (int32_t edge = 0; edge < POINT_COUNT[shard]; edge += 1) {
+      SHARD_BOUNDARY_EDGE[edge_start + edge] = edge_is_shared_with_field(shard, edge) ? 0 : 1;
+    }
+  }
 }
 
 static void initialize_balls(uint32_t seed, double field_seed_override, int32_t requested_balls) {
@@ -688,6 +729,7 @@ static void initialize_balls(uint32_t seed, double field_seed_override, int32_t 
 typedef struct {
   int32_t valid;
   int32_t shard;
+  int32_t boundary;
   double time;
   double point_x;
   double point_y;
@@ -753,10 +795,11 @@ static void outward_normal_from_feature(double x, double y, Feature feature, dou
   }
 }
 
-static void consider_collision(Collision *best, int32_t shard, double time, double point_x, double point_y, double normal_x, double normal_y) {
+static void consider_collision(Collision *best, int32_t shard, int32_t boundary, double time, double point_x, double point_y, double normal_x, double normal_y) {
   if (time < -0.000001 || time > 1.000001 || (best->valid && time >= best->time)) return;
   best->valid = 1;
   best->shard = shard;
+  best->boundary = boundary;
   best->time = time < 0.0 ? 0.0 : time > 1.0 ? 1.0 : time;
   best->point_x = point_x;
   best->point_y = point_y;
@@ -764,8 +807,85 @@ static void consider_collision(Collision *best, int32_t shard, double time, doub
   best->normal_y = normal_y;
 }
 
+static void consider_boundary_edge_collision(
+  Collision *best,
+  int32_t shard,
+  int32_t edge_index,
+  double x,
+  double y,
+  double movement_x,
+  double movement_y,
+  double radius
+) {
+  int32_t start = shard * MAX_CELL_POINTS;
+  int32_t next = (edge_index + 1) % POINT_COUNT[shard];
+  double ax = POINT_X[start + edge_index];
+  double ay = POINT_Y[start + edge_index];
+  double bx = POINT_X[start + next];
+  double by = POINT_Y[start + next];
+  double edge_x = bx - ax;
+  double edge_y = by - ay;
+  double edge_length_squared = edge_x * edge_x + edge_y * edge_y;
+  if (edge_length_squared <= 0.000000000001) return;
+
+  double inward_x = -edge_y;
+  double inward_y = edge_x;
+  double midpoint_x = (ax + bx) / 2.0;
+  double midpoint_y = (ay + by) / 2.0;
+  if (inward_x * (SHARD_SX[shard] - midpoint_x) + inward_y * (SHARD_SY[shard] - midpoint_y) < 0.0) {
+    inward_x = -inward_x;
+    inward_y = -inward_y;
+  }
+  double normal_length = sqrt(inward_x * inward_x + inward_y * inward_y);
+  if (normal_length <= 0.000000001) return;
+  inward_x /= normal_length;
+  inward_y /= normal_length;
+
+  double signed_start = (x - ax) * inward_x + (y - ay) * inward_y;
+  double signed_movement = movement_x * inward_x + movement_y * inward_y;
+  if (signed_movement < -0.000000001) {
+    double time = signed_start <= radius ? 0.0 : (radius - signed_start) / signed_movement;
+    if (time >= -0.000001 && time <= 1.000001) {
+      double center_x = x + movement_x * time;
+      double center_y = y + movement_y * time;
+      double projection = ((center_x - ax) * edge_x + (center_y - ay) * edge_y) / edge_length_squared;
+      if (projection >= -0.000001 && projection <= 1.000001) {
+        if (projection < 0.0) projection = 0.0;
+        if (projection > 1.0) projection = 1.0;
+        consider_collision(best, shard, 1, time, ax + edge_x * projection, ay + edge_y * projection, inward_x, inward_y);
+      }
+    }
+  }
+
+  double movement_length_squared = movement_x * movement_x + movement_y * movement_y;
+  if (movement_length_squared <= 0.0) return;
+  for (int32_t endpoint = 0; endpoint < 2; endpoint += 1) {
+    double vertex_x = endpoint == 0 ? ax : bx;
+    double vertex_y = endpoint == 0 ? ay : by;
+    double offset_x = x - vertex_x;
+    double offset_y = y - vertex_y;
+    double coefficient_b = 2.0 * (offset_x * movement_x + offset_y * movement_y);
+    double coefficient_c = offset_x * offset_x + offset_y * offset_y - radius * radius;
+    double discriminant = coefficient_b * coefficient_b - 4.0 * movement_length_squared * coefficient_c;
+    if (discriminant < 0.0) continue;
+    double root = (-coefficient_b - sqrt(discriminant)) / (2.0 * movement_length_squared);
+    if (root < -0.000001 || root > 1.000001) continue;
+    double center_x = x + movement_x * root;
+    double center_y = y + movement_y * root;
+    double normal_x = center_x - vertex_x;
+    double normal_y = center_y - vertex_y;
+    double endpoint_normal_length = sqrt(normal_x * normal_x + normal_y * normal_y);
+    if (endpoint_normal_length <= 0.000000001) continue;
+    normal_x /= endpoint_normal_length;
+    normal_y /= endpoint_normal_length;
+    if (movement_x * normal_x + movement_y * normal_y >= 0.0) continue;
+    if (normal_x * inward_x + normal_y * inward_y < -0.000001) continue;
+    consider_collision(best, shard, 1, root, vertex_x, vertex_y, normal_x, normal_y);
+  }
+}
+
 static Collision collision_for(double x, double y, double next_x, double next_y, double radius) {
-  Collision best = {0, -1, 0.0, 0.0, 0.0, 0.0, 0.0};
+  Collision best = {0, -1, 0, 0.0, 0.0, 0.0, 0.0, 0.0};
   double movement_x = next_x - x;
   double movement_y = next_y - y;
   int32_t min_x = (int32_t)floor(x < next_x ? x : next_x) - 1;
@@ -781,9 +901,14 @@ static Collision collision_for(double x, double y, double next_x, double next_y,
     for (int32_t gx = min_x; gx <= max_x; gx += 1) {
       if (!in_grid(gx, gy)) continue;
       int32_t shard = GRID[grid_index(gx, gy)];
-      if (shard < 0 || SHARD_BROKEN[shard]) continue;
+      if (shard < 0) continue;
       int32_t count = POINT_COUNT[shard];
       int32_t start = shard * MAX_CELL_POINTS;
+      for (int32_t index = 0; index < count; index += 1) {
+        if (!SHARD_BOUNDARY_EDGE[start + index]) continue;
+        consider_boundary_edge_collision(&best, shard, index, x, y, movement_x, movement_y, radius);
+      }
+      if (SHARD_BROKEN[shard]) continue;
       int32_t start_inside = point_in_polygon(x, y, shard);
       Feature nearest_start = nearest_feature(x, y, shard);
       if (start_inside || nearest_start.distance < radius) {
@@ -795,7 +920,7 @@ static Collision collision_for(double x, double y, double next_x, double next_y,
           outward_normal_from_feature(x, y, nearest_start, &start_normal_x, &start_normal_y);
         }
         if (movement_x * start_normal_x + movement_y * start_normal_y < 0.0) {
-          consider_collision(&best, shard, 0.0, nearest_start.point_x, nearest_start.point_y, start_normal_x, start_normal_y);
+          consider_collision(&best, shard, 0, 0.0, nearest_start.point_x, nearest_start.point_y, start_normal_x, start_normal_y);
         }
         continue;
       }
@@ -810,7 +935,7 @@ static Collision collision_for(double x, double y, double next_x, double next_y,
         outward_normal_from_feature(next_x, next_y, nearest_end, &end_normal_x, &end_normal_y);
       }
       if (end_inside || (nearest_end.distance < radius && movement_x * end_normal_x + movement_y * end_normal_y < 0.0)) {
-        consider_collision(&best, shard, 1.0, nearest_end.point_x, nearest_end.point_y, end_normal_x, end_normal_y);
+        consider_collision(&best, shard, 0, 1.0, nearest_end.point_x, nearest_end.point_y, end_normal_x, end_normal_y);
       }
 
       for (int32_t index = 0; index < count; index += 1) {
@@ -844,7 +969,7 @@ static Collision collision_for(double x, double y, double next_x, double next_y,
         if (projection < -0.000001 || projection > 1.000001) continue;
         if (projection < 0.0) projection = 0.0;
         if (projection > 1.0) projection = 1.0;
-        consider_collision(&best, shard, time, ax + edge_x * projection, ay + edge_y * projection, -inward_x, -inward_y);
+        consider_collision(&best, shard, 0, time, ax + edge_x * projection, ay + edge_y * projection, -inward_x, -inward_y);
       }
 
       double movement_length_squared = movement_x * movement_x + movement_y * movement_y;
@@ -867,7 +992,7 @@ static Collision collision_for(double x, double y, double next_x, double next_y,
           double normal_length = sqrt(normal_x * normal_x + normal_y * normal_y);
           if (normal_length == 0.0) normal_length = 1.0;
           if (movement_x * normal_x + movement_y * normal_y >= 0.0) continue;
-          consider_collision(&best, shard, root, vertex_x, vertex_y, normal_x / normal_length, normal_y / normal_length);
+          consider_collision(&best, shard, 0, root, vertex_x, vertex_y, normal_x / normal_length, normal_y / normal_length);
         }
       }
     }
@@ -940,13 +1065,15 @@ static void step_simulation(void) {
         BALL_VX[ball] = bounced_x * jitter_cosine - bounced_y * jitter_sine;
         BALL_VY[ball] = bounced_x * jitter_sine + bounced_y * jitter_cosine;
         record_event(1, collision.shard, collision.shard);
-        if (BALL_HIT_COOLDOWN[ball] <= 0.0) {
-          double direct_damage = BASE_HIT_DAMAGE;
-          if (chosen_one_unlocked && ball == CHOSEN_BALL_INDEX) direct_damage *= CHOSEN_ONE_DAMAGE_MULTIPLIER;
-          damage_shard(collision.shard, direct_damage, collision.point_x, collision.point_y, -collision.normal_x, -collision.normal_y, 1);
-          BALL_HIT_COOLDOWN[ball] = 0.14;
+        if (!collision.boundary) {
+          if (BALL_HIT_COOLDOWN[ball] <= 0.0) {
+            double direct_damage = BASE_HIT_DAMAGE;
+            if (chosen_one_unlocked && ball == CHOSEN_BALL_INDEX) direct_damage *= CHOSEN_ONE_DAMAGE_MULTIPLIER;
+            damage_shard(collision.shard, direct_damage, collision.point_x, collision.point_y, -collision.normal_x, -collision.normal_y, 1);
+            BALL_HIT_COOLDOWN[ball] = 0.14;
+          }
+          apply_resonance(collision.shard, ball);
         }
-        apply_resonance(collision.shard, ball);
       }
       remaining *= (1.0 - collision.time) > 0.0 ? 1.0 - collision.time : 0.0;
       collision_count += 1;
@@ -1175,6 +1302,11 @@ __attribute__((export_name("get_shard_point_count"))) int32_t get_shard_point_co
 __attribute__((export_name("get_shard_point_x"))) double get_shard_point_x(int32_t shard, int32_t point) { return shard >= 0 && shard < shard_count && point >= 0 && point < POINT_COUNT[shard] ? POINT_X[shard * MAX_CELL_POINTS + point] : 0.0; }
 __attribute__((export_name("get_shard_point_y"))) double get_shard_point_y(int32_t shard, int32_t point) { return shard >= 0 && shard < shard_count && point >= 0 && point < POINT_COUNT[shard] ? POINT_Y[shard * MAX_CELL_POINTS + point] : 0.0; }
 __attribute__((export_name("is_shard_broken"))) int32_t is_shard_broken(int32_t index) { return index >= 0 && index < shard_count ? SHARD_BROKEN[index] : 0; }
+__attribute__((export_name("is_shard_boundary_edge"))) int32_t is_shard_boundary_edge(int32_t shard, int32_t edge) {
+  return shard >= 0 && shard < shard_count && edge >= 0 && edge < POINT_COUNT[shard]
+    ? SHARD_BOUNDARY_EDGE[shard * MAX_CELL_POINTS + edge]
+    : 0;
+}
 __attribute__((export_name("get_shard_health"))) double get_shard_health(int32_t index) { return index >= 0 && index < shard_count ? SHARD_HEALTH[index] : 0.0; }
 __attribute__((export_name("get_shard_health_updated_at"))) double get_shard_health_updated_at(int32_t index) { return index >= 0 && index < shard_count ? SHARD_HEALTH_UPDATED_AT[index] : 0.0; }
 __attribute__((export_name("get_shard_growth"))) double get_shard_growth(int32_t index) { return index >= 0 && index < shard_count ? SHARD_GROWTH[index] : 0.0; }
