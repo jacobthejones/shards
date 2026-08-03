@@ -16,6 +16,7 @@ import {
   growthTechIsUnlocked,
   type GrowthTech,
 } from "./growth-tech-tree";
+import { WasmSimulation } from "./wasm-simulation";
 
 const TAU = Math.PI * 2;
 
@@ -130,8 +131,9 @@ export default function GrowthPage() {
     const context = canvas.getContext("2d");
     if (!context) return;
 
-    const state = createGrowthState();
-    stateRef.current = state;
+    stateRef.current = createGrowthState();
+    let geometryReady = false;
+    let disposed = false;
     let width = 1;
     let height = 1;
     let dpr = 1;
@@ -179,9 +181,7 @@ export default function GrowthPage() {
       fieldGlow.addColorStop(0.82, "rgba(17, 56, 54, 0.03)");
       fieldGlow.addColorStop(1, "rgba(5, 15, 20, 0)");
       context.fillStyle = fieldGlow;
-      context.beginPath();
-      context.arc(0, 0, activeState.fieldRadius, 0, TAU);
-      context.fill();
+      context.fillRect(-activeState.fieldRadius, -activeState.fieldRadius, activeState.fieldRadius * 2, activeState.fieldRadius * 2);
 
       activeState.shards.forEach((shard) => {
         if (activeState.mode === "finale" && shard.key !== activeState.finalShardKey) return;
@@ -218,13 +218,26 @@ export default function GrowthPage() {
         context.restore();
       });
 
+      context.save();
       context.strokeStyle = "rgba(242, 207, 123, 0.82)";
       context.lineWidth = 0.032;
+      context.lineCap = "round";
+      context.lineJoin = "round";
       context.shadowBlur = 0.2;
       context.shadowColor = "rgba(239, 199, 107, 0.32)";
-      context.beginPath();
-      context.arc(0, 0, activeState.fieldRadius, 0, TAU);
-      context.stroke();
+      if (activeState.fieldBoundaryEdges.length > 0) {
+        activeState.fieldBoundaryEdges.forEach(([[ax, ay], [bx, by]]) => {
+          context.beginPath();
+          context.moveTo(ax, ay);
+          context.lineTo(bx, by);
+          context.stroke();
+        });
+      } else {
+        context.beginPath();
+        context.arc(0, 0, activeState.fieldRadius, 0, TAU);
+        context.stroke();
+      }
+      context.restore();
       context.restore();
 
       const vignette = context.createRadialGradient(
@@ -244,18 +257,19 @@ export default function GrowthPage() {
     const tick = (now: number) => {
       const delta = Math.min(0.05, Math.max(0, (now - lastTime) / 1000));
       lastTime = now;
-      if (!pausedRef.current) {
-        stepGrowthState(state, delta);
-        if (lastModeRef.current !== state.mode) {
-          lastModeRef.current = state.mode;
-          setMode(state.mode);
+      const activeState = stateRef.current;
+      if (activeState && geometryReady && !pausedRef.current) {
+        stepGrowthState(activeState, delta);
+        if (lastModeRef.current !== activeState.mode) {
+          lastModeRef.current = activeState.mode;
+          setMode(activeState.mode);
           setFinaleRemaining(0);
         }
-        if (state.mode === "finale") setFinaleRemaining(state.finaleRemaining);
+        if (activeState.mode === "finale") setFinaleRemaining(activeState.finaleRemaining);
         if (now - lastHudUpdateRef.current > 180) {
           lastHudUpdateRef.current = now;
-          setCompletions(state.growthCompletions);
-          setScore(Math.floor(state.score));
+          setCompletions(activeState.growthCompletions);
+          setScore(Math.floor(activeState.score));
         }
       }
       draw();
@@ -265,8 +279,20 @@ export default function GrowthPage() {
     resize();
     const observer = new ResizeObserver(resize);
     observer.observe(canvas);
+    void WasmSimulation.create().then((runtime) => {
+      if (disposed) return;
+      runtime.reset();
+      stateRef.current = createGrowthState(runtime.getStaticShards());
+      geometryReady = true;
+      lastTime = performance.now();
+    }).catch(() => {
+      if (disposed) return;
+      geometryReady = true;
+      lastTime = performance.now();
+    });
     frame = window.requestAnimationFrame(tick);
     return () => {
+      disposed = true;
       window.cancelAnimationFrame(frame);
       observer.disconnect();
       stateRef.current = null;

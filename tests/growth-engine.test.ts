@@ -20,6 +20,31 @@ test("the growth endpoint begins one second before the final normal-game break",
   assert.equal(state.balls.length, 15);
 });
 
+test("growth mode preserves the current shard geometry and exposed jagged boundary", () => {
+  const staticShard = {
+    key: "0:0",
+    gx: 0,
+    gy: 0,
+    sx: 0,
+    sy: 0,
+    points: [[-1, -1], [1, -1], [1, 1], [-1, 1]] as [number, number][],
+    hue: 188,
+    seed: 1,
+    fieldSeed: 42,
+    boundaryEdges: [
+      [[-10, -1], [0, -10]],
+      [[0, -10], [10, -1]],
+      [[10, -1], [1, 10]],
+      [[1, 10], [-10, -1]],
+    ] as [[number, number], [number, number]][],
+  };
+  const state = createGrowthState([staticShard]);
+
+  assert.deepEqual(state.shards.get("0:0")?.points, staticShard.points);
+  assert.deepEqual(state.fieldBoundaryEdges, staticShard.boundaryEdges);
+  assert.ok(state.fieldRadius > 7.4);
+});
+
 test("incomplete growth decays at one percent per second", () => {
   const state = createGrowthState();
   enterGrowthMode(state);

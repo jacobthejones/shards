@@ -1,9 +1,12 @@
 import {
   BASE_BALL_RADIUS,
+  INITIAL_BALL_SPEED,
   TAU,
   buildVoronoiCell,
   keyFor,
+  type ShardBoundaryEdge,
   type Shard,
+  type StaticShardState,
 } from "./simulation";
 
 export type GrowthBall = {
@@ -28,6 +31,7 @@ export type GrowthState = {
   time: number;
   finaleRemaining: number;
   fieldRadius: number;
+  fieldBoundaryEdges: ShardBoundaryEdge[];
   fieldSeed: number;
   shards: Map<string, GrowthShard>;
   finalShardKey: string;
@@ -41,7 +45,7 @@ export type GrowthState = {
 export const GROWTH_DECAY_RATE = 0.01;
 export const GROWTH_DEPOSIT_RATE = 0.72;
 export const GROWTH_FIELD_RADIUS = 7.4;
-export const BALL_SPEED = 1.05;
+export const BALL_SPEED = INITIAL_BALL_SPEED;
 export const BALL_RADIUS = BASE_BALL_RADIUS;
 export const TRAIL_SECONDS = 2.4;
 
@@ -145,11 +149,11 @@ const makeShards = (fieldSeed: number): Map<string, GrowthShard> => {
   return shards;
 };
 
-const makeBalls = (count: number, seed: number): GrowthBall[] => {
+const makeBalls = (count: number, seed: number, fieldRadius: number): GrowthBall[] => {
   const random = seededRandom(seed);
   const balls: GrowthBall[] = [];
   for (let id = 0; id < count; id += 1) {
-    const radius = Math.sqrt(random()) * 5.3;
+    const radius = Math.sqrt(random()) * fieldRadius * 0.62;
     const positionAngle = random() * TAU;
     const speedAngle = positionAngle + (random() - 0.5) * 0.7;
     balls.push({
@@ -165,9 +169,45 @@ const makeBalls = (count: number, seed: number): GrowthBall[] => {
   return balls;
 };
 
-export const createGrowthState = (): GrowthState => {
-  const fieldSeed = 3.25;
-  const shards = makeShards(fieldSeed);
+const fieldFromStaticShards = (staticShards: StaticShardState[]) => {
+  if (staticShards.length === 0) {
+    const fieldSeed = 3.25;
+    return {
+      fieldSeed,
+      fieldRadius: GROWTH_FIELD_RADIUS,
+      fieldBoundaryEdges: [] as ShardBoundaryEdge[],
+      shards: makeShards(fieldSeed),
+    };
+  }
+
+  const shards = new Map<string, GrowthShard>(staticShards.map((staticShard) => [staticShard.key, {
+    ...staticShard,
+    health: 1,
+    maxHealth: 1,
+    healthUpdatedAt: 0,
+    growth: 0,
+    growing: false,
+    tangible: false,
+    impacts: [],
+  }]));
+  const fieldBoundaryEdges = staticShards.flatMap((shard) => shard.boundaryEdges);
+  const boundaryPoints = fieldBoundaryEdges.flatMap(([[ax, ay], [bx, by]]) => [[ax, ay], [bx, by]] as [number, number][]);
+  const shardPoints = staticShards.flatMap((shard) => shard.points);
+  const fieldRadius = Math.max(
+    ...[...boundaryPoints, ...shardPoints].map(([x, y]) => Math.hypot(x, y)),
+    GROWTH_FIELD_RADIUS,
+  );
+  return {
+    fieldSeed: staticShards[0].fieldSeed,
+    fieldRadius,
+    fieldBoundaryEdges,
+    shards,
+  };
+};
+
+export const createGrowthState = (staticShards: StaticShardState[] = []): GrowthState => {
+  const field = fieldFromStaticShards(staticShards);
+  const { fieldSeed, fieldRadius, fieldBoundaryEdges, shards } = field;
   const finalShard = shards.get(FINAL_SHARD_KEY);
   if (finalShard) {
     finalShard.growth = 0.2;
@@ -177,11 +217,12 @@ export const createGrowthState = (): GrowthState => {
     mode: "finale",
     time: 0,
     finaleRemaining: 1,
-    fieldRadius: GROWTH_FIELD_RADIUS,
+    fieldRadius,
+    fieldBoundaryEdges,
     fieldSeed,
     shards,
     finalShardKey: FINAL_SHARD_KEY,
-    balls: makeBalls(15, 0x6f31a2d1),
+    balls: makeBalls(15, 0x6f31a2d1, fieldRadius),
     score: 1200,
     unlockedTechs: [],
     growthCompletions: 0,
@@ -189,7 +230,7 @@ export const createGrowthState = (): GrowthState => {
   };
 };
 
-const bounceOffField = (ball: GrowthBall, fieldRadius: number) => {
+const bounceOffCircularField = (ball: GrowthBall, fieldRadius: number) => {
   const distance = Math.hypot(ball.x, ball.y);
   const limit = fieldRadius - BALL_RADIUS * 1.5;
   if (distance <= limit) return;
@@ -201,6 +242,50 @@ const bounceOffField = (ball: GrowthBall, fieldRadius: number) => {
   if (outwardVelocity > 0) {
     ball.vx -= outwardVelocity * 2 * normalX;
     ball.vy -= outwardVelocity * 2 * normalY;
+  }
+};
+
+const bounceOffField = (ball: GrowthBall, state: GrowthState) => {
+  if (state.fieldBoundaryEdges.length === 0) {
+    bounceOffCircularField(ball, state.fieldRadius);
+    return;
+  }
+
+  let best: {
+    signedDistance: number;
+    normalX: number;
+    normalY: number;
+    closestX: number;
+    closestY: number;
+  } | null = null;
+  for (const [[ax, ay], [bx, by]] of state.fieldBoundaryEdges) {
+    const edgeX = bx - ax;
+    const edgeY = by - ay;
+    const length = Math.hypot(edgeX, edgeY);
+    if (length === 0) continue;
+    let normalX = -edgeY / length;
+    let normalY = edgeX / length;
+    const midpointX = (ax + bx) / 2;
+    const midpointY = (ay + by) / 2;
+    if (normalX * midpointX + normalY * midpointY < 0) {
+      normalX = -normalX;
+      normalY = -normalY;
+    }
+    const closest = distanceToSegment(ball.x, ball.y, ax, ay, bx, by);
+    const signedDistance = (ball.x - closest.closestX) * normalX + (ball.y - closest.closestY) * normalY;
+    if (signedDistance <= -BALL_RADIUS) continue;
+    if (!best || signedDistance > best.signedDistance) {
+      best = { signedDistance, normalX, normalY, closestX: closest.closestX, closestY: closest.closestY };
+    }
+  }
+  const boundary = best;
+  if (!boundary) return;
+  ball.x = boundary.closestX - boundary.normalX * (BALL_RADIUS + 0.006);
+  ball.y = boundary.closestY - boundary.normalY * (BALL_RADIUS + 0.006);
+  const outwardVelocity = ball.vx * boundary.normalX + ball.vy * boundary.normalY;
+  if (outwardVelocity > 0) {
+    ball.vx -= outwardVelocity * 2 * boundary.normalX;
+    ball.vy -= outwardVelocity * 2 * boundary.normalY;
   }
 };
 
@@ -277,7 +362,7 @@ export const stepGrowthState = (state: GrowthState, elapsedSeconds: number) => {
   state.balls.forEach((ball) => {
     ball.x += ball.vx * delta;
     ball.y += ball.vy * delta;
-    bounceOffField(ball, state.fieldRadius);
+    bounceOffField(ball, state);
     if (state.mode === "growth") bounceOffTangibleShards(state, ball);
     addTrailPoint(ball, delta);
     if (state.mode === "growth") growAtBall(state, ball, delta);
