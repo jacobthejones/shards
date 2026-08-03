@@ -1,5 +1,6 @@
 import { readdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { rewriteProjectSiteAssetReferences } from "./github-pages-assets.mjs";
 
 const outputRoot = path.resolve("dist/client");
 const textExtensions = new Set([".css", ".html", ".js", ".json", ".rsc"]);
@@ -23,15 +24,7 @@ const collectFiles = async (directory) => {
 
 for (const filePath of await collectFiles(outputRoot)) {
   const source = await readFile(filePath, "utf8");
-  const rewritten = source
-    .replaceAll("/assets/", "/shards/assets/")
-    // Vinext prepends a slash when resolving these dependency-map entries.
-    // Keep the project prefix slash-free here, or they become //shards/... URLs.
-    .replaceAll('"assets/', '"shards/assets/')
-    .replaceAll("'assets/", "'shards/assets/")
-    .replaceAll("/favicon.svg", "/shards/favicon.svg")
-    .replaceAll("/simulation.wasm", "/shards/simulation.wasm")
-    .replaceAll(/\/shards\/assets\/([A-Za-z0-9._-]+)/g, `/shards/assets/$1?v=${assetVersion}`);
+  const rewritten = rewriteProjectSiteAssetReferences(source, assetVersion);
 
   if (rewritten !== source) await writeFile(filePath, rewritten);
 }

@@ -11,7 +11,7 @@
     "build:wasm": "node scripts/build-simulation-wasm.mjs",
     "start": "vinext start",
     "typecheck": "tsc --noEmit",
-    "test": "npm run build:wasm && npm run build && node --test tests/rendered-html.test.mjs && node --import tsx --test tests/camera.test.ts tests/render-cache.test.ts tests/save-state.test.ts tests/wasm-runtime.test.ts",
+    "test": "npm run build:wasm && npm run build && node --test tests/rendered-html.test.mjs tests/github-pages-assets.test.mjs && node --import tsx --test tests/camera.test.ts tests/render-cache.test.ts tests/save-state.test.ts tests/wasm-runtime.test.ts",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next"
   },
   "dependencies": {
