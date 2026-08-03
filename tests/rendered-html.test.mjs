@@ -8,7 +8,7 @@ async function render() {
   const { default: handler } = await import(serverUrl.href);
 
   return handler(
-    new Request("http://localhost/", {
+    new Request("http://localhost/shards/", {
       headers: { accept: "text/html" },
     }),
   );
@@ -36,6 +36,11 @@ test("server-renders the shards experience", async () => {
   assert.match(html, /sound/);
   assert.match(html, /aria-label="Live shards Voronoi field"/);
   assert.doesNotMatch(html, /codex-preview|Your site is taking shape|react-loading-skeleton/i);
+});
+
+test("the production config declares the GitHub Pages project base path", async () => {
+  const config = await readFile(new URL("../next.config.ts", import.meta.url), "utf8");
+  assert.match(config, /basePath:\s*["']\/shards["']/);
 });
 
 test("keeps the prototype self-contained", async () => {

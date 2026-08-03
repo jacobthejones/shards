@@ -29,6 +29,8 @@ jobs:
         run: npm ci
       - name: Build static site
         run: npm run build
+      - name: Export project-site routes
+        run: npm run export:pages
       - name: Prepare project-site paths
         run: node scripts/prepare-github-pages.mjs
       - name: Upload Pages artifact
