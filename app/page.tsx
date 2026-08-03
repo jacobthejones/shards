@@ -710,10 +710,25 @@ export default function Home() {
 
     const drawArrow = (arrow: Arrow) => {
       const isChosenBall = arrow.id === 0 && sim.unlockedTechs.includes(TECH_IDS.CHOSEN_ONE);
+      const isCorrosiveCharged = arrow.corrosiveWakeCharged;
       context.save();
-      context.shadowBlur = 0.28;
-      context.shadowColor = isChosenBall ? "rgba(232, 240, 244, 0.86)" : `hsla(${arrow.hue}, 100%, 74%, 0.8)`;
-      context.fillStyle = isChosenBall ? "#e1e8ec" : `hsl(${arrow.hue}, 88%, 68%)`;
+      context.shadowBlur = isCorrosiveCharged ? 0.5 : 0.28;
+      context.shadowColor = isCorrosiveCharged
+        ? "rgba(255, 48, 48, 0.94)"
+        : isChosenBall
+          ? "rgba(232, 240, 244, 0.86)"
+          : `hsla(${arrow.hue}, 100%, 74%, 0.8)`;
+      if (isCorrosiveCharged) {
+        context.fillStyle = "rgba(255, 58, 54, 0.22)";
+        context.beginPath();
+        context.arc(arrow.x, arrow.y, sim.ballRadius * 1.9, 0, TAU);
+        context.fill();
+      }
+      context.fillStyle = isCorrosiveCharged
+        ? "#ff7770"
+        : isChosenBall
+          ? "#e1e8ec"
+          : `hsl(${arrow.hue}, 88%, 68%)`;
       context.beginPath();
       context.arc(arrow.x, arrow.y, sim.ballRadius, 0, TAU);
       context.fill();
@@ -726,10 +741,10 @@ export default function Home() {
       context.lineCap = "round";
       context.lineJoin = "round";
       context.shadowBlur = 0.16;
-      context.shadowColor = "rgba(174, 224, 160, 0.42)";
+      context.shadowColor = "rgba(255, 48, 48, 0.52)";
       sim.corrosiveWake.forEach((segment) => {
         const strength = Math.max(0, Math.min(1, 1 - segment.age / CORROSIVE_WAKE_DURATION_SECONDS));
-        context.strokeStyle = `rgba(174, 224, 160, ${0.08 + strength * 0.36})`;
+        context.strokeStyle = `rgba(235, 65, 60, ${0.08 + strength * 0.36})`;
         context.lineWidth = 0.045 + strength * 0.07;
         context.beginPath();
         context.moveTo(segment.startX, segment.startY);

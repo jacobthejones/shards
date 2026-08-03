@@ -33,7 +33,7 @@ export const TECH_TREE: TechDefinition[] = [
   {
     id: TECH_IDS.CORROSIVE_WAKE,
     title: "Corrosive Wake",
-    description: "The chosen ball leaves a fading wake. Any ball that passes through it makes its next shard impact five times stronger.",
+    description: "The chosen ball leaves a fading red wake. Any ball that passes through it destroys its next shard in one hit.",
     icon: "corrosive-wake",
     cost: CORROSIVE_WAKE_COST,
     dependsOn: [TECH_IDS.CHOSEN_ONE],
@@ -41,7 +41,7 @@ export const TECH_TREE: TechDefinition[] = [
   {
     id: TECH_IDS.CHOSEN_ONE,
     title: "The Chosen One",
-    description: "The first ball becomes chosen. Its impacts break five times harder, and its resonance carries that strength outward.",
+    description: "The first ball becomes chosen. It destroys shards in one hit, and its resonance carries that strength outward.",
     icon: "chosen-one",
     cost: CHOSEN_ONE_COST,
     dependsOn: [],

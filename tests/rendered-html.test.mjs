@@ -87,6 +87,9 @@ test("keeps the prototype self-contained", async () => {
   assert.match(page, /chosen-one-icon/);
   assert.match(page, /corrosive-wake-icon/);
   assert.match(page, /drawCorrosiveWake/);
+  assert.match(page, /corrosiveWakeCharged/);
+  assert.match(page, /rgba\(255, 48, 48, 0\.94\)/);
+  assert.match(page, /rgba\(235, 65, 60/);
   assert.match(page, /TECH_TREE_BRANCHES/);
   assert.match(page, /sim\.unlockedTechs\.includes\(TECH_IDS\.CHOSEN_ONE\)/);
   assert.match(page, /#e1e8ec/);
@@ -156,6 +159,8 @@ test("keeps the prototype self-contained", async () => {
   assert.match(techTree, /icon: "conduction"/);
   assert.match(techTree, /icon: "chosen-one"/);
   assert.match(techTree, /Corrosive Wake/);
+  assert.match(techTree, /destroys its next shard in one hit/);
+  assert.doesNotMatch(techTree, /five times stronger/);
   assert.match(techTree, /icon: "corrosive-wake"/);
   assert.match(css, /tech-branch-line/);
   assert.match(renderCache, /RENDER_CHUNK_SIZE = 8/);
