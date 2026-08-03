@@ -36,7 +36,8 @@ const makeSimulation = (): Simulation => ({
   ]]),
   broken: new Set(),
   fieldSeed: 1234,
-  arrows: [{ id: 0, x: 1.2, y: -0.4, vx: 0.3, vy: -0.7, hue: 188, hitCooldown: 0.02 }],
+  arrows: [{ id: 0, x: 1.2, y: -0.4, vx: 0.3, vy: -0.7, hue: 188, hitCooldown: 0.02, corrosiveWakeCharged: true }],
+  corrosiveWake: [],
   nextArrowId: 1,
   nextImpactId: 5,
   unlockedTechs: [],
@@ -66,6 +67,7 @@ test("a saved simulation includes its version and can be loaded", () => {
   assert.equal(loaded.score, 987);
   assert.equal(loaded.time, 42.5);
   assert.equal(loaded.arrows.length, 1);
+  assert.equal(loaded.arrows[0]?.corrosiveWakeCharged, true);
   assert.equal(loaded.shards[0]?.health, 0.6);
   assert.equal(loaded.shards[0]?.growth, 0.42);
   assert.equal(loaded.shards[0]?.growing, true);
@@ -75,12 +77,22 @@ test("a saved simulation includes its version and can be loaded", () => {
 
 test("a saved simulation preserves purchased technologies", () => {
   const simulation = makeSimulation();
-  simulation.unlockedTechs = ["new-growth", "chosen-one", "resonance", "conduction"];
+  simulation.unlockedTechs = ["corrosive-wake", "chosen-one", "resonance", "conduction"];
 
   const loaded = loadSaveState(serializeSaveState(saveStateForSimulation(simulation)));
 
   assert.ok(loaded);
-  assert.deepEqual(loaded.unlockedTechs, ["new-growth", "chosen-one", "resonance", "conduction"]);
+  assert.deepEqual(loaded.unlockedTechs, ["corrosive-wake", "chosen-one", "resonance", "conduction"]);
+});
+
+test("a legacy New Growth unlock converts to Corrosive Wake", () => {
+  const legacySave = saveStateForSimulation(makeSimulation()) as Record<string, unknown>;
+  legacySave.unlockedTechs = ["new-growth", "chosen-one"];
+
+  const loaded = loadSaveState(JSON.stringify(legacySave));
+
+  assert.ok(loaded);
+  assert.deepEqual(loaded.unlockedTechs, ["corrosive-wake", "chosen-one"]);
 });
 
 test("every declared save version has a conversion path to the current version", () => {
@@ -98,12 +110,18 @@ test("every declared save version has a conversion path to the current version",
 test("a legacy V1 save loads without any unlocked technologies", () => {
   const legacySave = saveStateForSimulation(makeSimulation()) as Record<string, unknown>;
   delete legacySave.unlockedTechs;
+  legacySave.arrows = (legacySave.arrows as Record<string, unknown>[]).map((arrow) => {
+    const legacyArrow = { ...arrow };
+    delete legacyArrow.corrosiveWakeCharged;
+    return legacyArrow;
+  });
   legacySave.version = SaveStateVersion.V1;
 
   const loaded = loadSaveState(JSON.stringify(legacySave));
   assert.ok(loaded);
   assert.equal(loaded.version, SaveStateVersion.V3);
   assert.deepEqual(loaded.unlockedTechs, []);
+  assert.equal(loaded.arrows[0]?.corrosiveWakeCharged, false);
   assert.equal(loaded.shards[0]?.growth, 0);
   assert.equal(loaded.shards[0]?.growing, false);
 });

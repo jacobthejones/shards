@@ -1,8 +1,14 @@
 export const TECH_IDS = {
-  NEW_GROWTH: "new-growth",
+  CORROSIVE_WAKE: "corrosive-wake",
   CHOSEN_ONE: "chosen-one",
   RESONANCE: "resonance",
   CONDUCTION: "conduction",
+} as const;
+
+// Kept so saves from the original New Growth branch can be converted without
+// losing the player's unlock when the branch is renamed and repurposed.
+export const LEGACY_TECH_IDS = {
+  NEW_GROWTH: "new-growth",
 } as const;
 
 export type TechId = typeof TECH_IDS[keyof typeof TECH_IDS];
@@ -10,9 +16,9 @@ export type TechId = typeof TECH_IDS[keyof typeof TECH_IDS];
 export const RESONANCE_COST = 10_000;
 export const CONDUCTION_COST = 50_000;
 export const CHOSEN_ONE_COST = 10_000;
-export const NEW_GROWTH_COST = 50_000;
+export const CORROSIVE_WAKE_COST = 50_000;
 
-export type TechIcon = "new-growth" | "chosen-one" | "resonance" | "conduction";
+export type TechIcon = "corrosive-wake" | "chosen-one" | "resonance" | "conduction";
 
 export type TechDefinition = {
   id: TechId;
@@ -25,11 +31,11 @@ export type TechDefinition = {
 
 export const TECH_TREE: TechDefinition[] = [
   {
-    id: TECH_IDS.NEW_GROWTH,
-    title: "New Growth",
-    description: "The chosen ball coaxes empty shards back into existence as it passes through them.",
-    icon: "new-growth",
-    cost: NEW_GROWTH_COST,
+    id: TECH_IDS.CORROSIVE_WAKE,
+    title: "Corrosive Wake",
+    description: "The chosen ball leaves a fading wake. Any ball that passes through it makes its next shard impact five times stronger.",
+    icon: "corrosive-wake",
+    cost: CORROSIVE_WAKE_COST,
     dependsOn: [TECH_IDS.CHOSEN_ONE],
   },
   {
@@ -59,7 +65,7 @@ export const TECH_TREE: TechDefinition[] = [
 ];
 
 export const TECH_TREE_BRANCHES: TechId[][] = [
-  [TECH_IDS.NEW_GROWTH, TECH_IDS.CHOSEN_ONE],
+  [TECH_IDS.CORROSIVE_WAKE, TECH_IDS.CHOSEN_ONE],
   [TECH_IDS.CONDUCTION, TECH_IDS.RESONANCE],
 ];
 

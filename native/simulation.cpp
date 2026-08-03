@@ -8,11 +8,14 @@
 #define GRID_SIZE 91
 #define GRID_CELLS (GRID_SIZE * GRID_SIZE)
 #define MAX_SHARDS 10000
-#define MAX_CELL_POINTS 32
-#define FIELD_SITE_RADIUS 24.0
+#define MAX_CELL_POINTS 64
+#define FIELD_SITE_SELECTION_RADIUS 27.0
+#define FIELD_BOUNDARY_POINT_COUNT 32
+#define FIELD_BOUNDARY_RADIUS 24.0
 #define MAX_IMPACTS 64
 #define MAX_BALLS 256
 #define MAX_EVENTS_PER_STEP 1024
+#define MAX_CORROSIVE_WAKE_SEGMENTS 512
 
 #define CELL_SIZE 1.0
 #define TAU 6.283185307179586476925286766559
@@ -29,12 +32,14 @@
 #define RESONANCE_COST 10000.0
 #define CONDUCTION_COST 50000.0
 #define CHOSEN_ONE_COST 10000.0
-#define NEW_GROWTH_COST 50000.0
+#define CORROSIVE_WAKE_COST 50000.0
+#define CORROSIVE_WAKE_DURATION_SECONDS 6.0
+#define CORROSIVE_WAKE_RADIUS 0.15
 #define RESONANCE_SPLASH_DAMAGE 0.1
 #define CONDUCTION_SPLASH_DAMAGE 0.05
 #define CHOSEN_ONE_DAMAGE_MULTIPLIER 5.0
 #define CHOSEN_BALL_INDEX 0
-#define SIMULATION_RUNTIME_VERSION 8
+#define SIMULATION_RUNTIME_VERSION 10
 #define BOUNCE_JITTER_RADIANS (0.02 * 3.1415926535897932384626433832795 / 180.0)
 #define COLLISION_SEPARATION 0.004
 #define MAX_COLLISIONS_PER_STEP 4
@@ -55,6 +60,8 @@ extern double ceil(double);
 static double POINT_X[MAX_SHARDS * MAX_CELL_POINTS];
 static double POINT_Y[MAX_SHARDS * MAX_CELL_POINTS];
 static int32_t POINT_COUNT[MAX_SHARDS];
+static double FIELD_BOUNDARY_X[FIELD_BOUNDARY_POINT_COUNT];
+static double FIELD_BOUNDARY_Y[FIELD_BOUNDARY_POINT_COUNT];
 static double CENTER_X[MAX_SHARDS];
 static double CENTER_Y[MAX_SHARDS];
 static int32_t GRID[GRID_CELLS];
@@ -87,6 +94,14 @@ static double BALL_Y[MAX_BALLS];
 static double BALL_VX[MAX_BALLS];
 static double BALL_VY[MAX_BALLS];
 static double BALL_HIT_COOLDOWN[MAX_BALLS];
+static int32_t BALL_CORROSIVE_WAKE_CHARGED[MAX_BALLS];
+
+static double CORROSIVE_WAKE_START_X[MAX_CORROSIVE_WAKE_SEGMENTS];
+static double CORROSIVE_WAKE_START_Y[MAX_CORROSIVE_WAKE_SEGMENTS];
+static double CORROSIVE_WAKE_END_X[MAX_CORROSIVE_WAKE_SEGMENTS];
+static double CORROSIVE_WAKE_END_Y[MAX_CORROSIVE_WAKE_SEGMENTS];
+static double CORROSIVE_WAKE_AGE[MAX_CORROSIVE_WAKE_SEGMENTS];
+static int32_t corrosive_wake_segment_count;
 
 static int32_t shard_count;
 static int32_t ball_count;
@@ -99,6 +114,9 @@ static uint32_t rng_state;
 static double current_field_seed;
 static int32_t next_impact_id;
 static int32_t chosen_one_unlocked;
+static int32_t corrosive_wake_unlocked;
+// Legacy New Growth state is retained with its implementation below for a
+// future repurpose. It is no longer part of the active tech tree.
 static int32_t new_growth_unlocked;
 static int32_t resonance_unlocked;
 static int32_t conduction_unlocked;
@@ -132,6 +150,20 @@ static double hash_value(double gx, double gy) {
 
 static double seeded_hash(double gx, double gy, double field_seed) {
   return hash_value(gx + field_seed * 17.13, gy - field_seed * 9.71);
+}
+
+static int32_t field_site_included(int32_t gx, int32_t gy) {
+  return sqrt((double)gx * gx + (double)gy * gy) <= FIELD_SITE_SELECTION_RADIUS;
+}
+
+static void build_field_boundary(double field_seed) {
+  for (int32_t index = 0; index < FIELD_BOUNDARY_POINT_COUNT; index += 1) {
+    double angle = TAU * (double)index / (double)FIELD_BOUNDARY_POINT_COUNT;
+    double radius = FIELD_BOUNDARY_RADIUS
+      + (seeded_hash((double)index + 90.1, (double)index - 33.2, field_seed) * 2.0 - 1.0) * 0.18;
+    FIELD_BOUNDARY_X[index] = cos(angle) * radius;
+    FIELD_BOUNDARY_Y[index] = sin(angle) * radius;
+  }
 }
 
 static double rng_next(void) {
@@ -193,15 +225,16 @@ static int32_t build_cell(int32_t gx, int32_t gy, double field_seed, double *sx,
   double polygon_y[MAX_CELL_POINTS];
   double clipped_x[MAX_CELL_POINTS];
   double clipped_y[MAX_CELL_POINTS];
-  int32_t polygon_count = 4;
-  polygon_x[0] = *sx - 2.1; polygon_y[0] = *sy - 2.1;
-  polygon_x[1] = *sx + 2.1; polygon_y[1] = *sy - 2.1;
-  polygon_x[2] = *sx + 2.1; polygon_y[2] = *sy + 2.1;
-  polygon_x[3] = *sx - 2.1; polygon_y[3] = *sy + 2.1;
+  int32_t polygon_count = FIELD_BOUNDARY_POINT_COUNT;
+  for (int32_t index = 0; index < polygon_count; index += 1) {
+    polygon_x[index] = FIELD_BOUNDARY_X[index];
+    polygon_y[index] = FIELD_BOUNDARY_Y[index];
+  }
 
   for (int32_t neighbor_y = gy - 4; neighbor_y <= gy + 4; neighbor_y += 1) {
     for (int32_t neighbor_x = gx - 4; neighbor_x <= gx + 4; neighbor_x += 1) {
       if (neighbor_x == gx && neighbor_y == gy) continue;
+      if (!field_site_included(neighbor_x, neighbor_y)) continue;
       double nx, ny;
       site_for(neighbor_x, neighbor_y, field_seed, &nx, &ny);
       double a = nx - *sx;
@@ -217,13 +250,7 @@ static int32_t build_cell(int32_t gx, int32_t gy, double field_seed, double *sx,
     if (polygon_count < 3) break;
   }
 
-  if (polygon_count < 3) {
-    polygon_count = 4;
-    polygon_x[0] = *sx - 0.42; polygon_y[0] = *sy - 0.42;
-    polygon_x[1] = *sx + 0.42; polygon_y[1] = *sy - 0.42;
-    polygon_x[2] = *sx + 0.42; polygon_y[2] = *sy + 0.42;
-    polygon_x[3] = *sx - 0.42; polygon_y[3] = *sy + 0.42;
-  }
+  if (polygon_count < 3) return 0;
   for (int32_t index = 0; index < polygon_count; index += 1) {
     points_x[index] = polygon_x[index];
     points_y[index] = polygon_y[index];
@@ -330,6 +357,67 @@ static double segment_distance_squared(
   candidate = point_segment_distance_squared(dx, dy, ax, ay, bx, by);
   if (candidate < distance) distance = candidate;
   return distance;
+}
+
+static void remove_corrosive_wake_segment(int32_t index) {
+  int32_t last = corrosive_wake_segment_count - 1;
+  if (index < 0 || index > last) return;
+  if (index != last) {
+    CORROSIVE_WAKE_START_X[index] = CORROSIVE_WAKE_START_X[last];
+    CORROSIVE_WAKE_START_Y[index] = CORROSIVE_WAKE_START_Y[last];
+    CORROSIVE_WAKE_END_X[index] = CORROSIVE_WAKE_END_X[last];
+    CORROSIVE_WAKE_END_Y[index] = CORROSIVE_WAKE_END_Y[last];
+    CORROSIVE_WAKE_AGE[index] = CORROSIVE_WAKE_AGE[last];
+  }
+  corrosive_wake_segment_count -= 1;
+}
+
+static void refresh_corrosive_wake() {
+  int32_t index = 0;
+  while (index < corrosive_wake_segment_count) {
+    CORROSIVE_WAKE_AGE[index] += FIXED_TIMESTEP;
+    if (CORROSIVE_WAKE_AGE[index] >= CORROSIVE_WAKE_DURATION_SECONDS) {
+      remove_corrosive_wake_segment(index);
+      continue;
+    }
+    index += 1;
+  }
+}
+
+static void add_corrosive_wake_segment(double start_x, double start_y, double end_x, double end_y) {
+  if (!corrosive_wake_unlocked) return;
+  double delta_x = end_x - start_x;
+  double delta_y = end_y - start_y;
+  if (delta_x * delta_x + delta_y * delta_y <= 0.000000000001) return;
+  int32_t index = corrosive_wake_segment_count;
+  if (index >= MAX_CORROSIVE_WAKE_SEGMENTS) {
+    index = 0;
+    for (int32_t candidate = 1; candidate < corrosive_wake_segment_count; candidate += 1) {
+      if (CORROSIVE_WAKE_AGE[candidate] > CORROSIVE_WAKE_AGE[index]) index = candidate;
+    }
+  } else {
+    corrosive_wake_segment_count += 1;
+  }
+  CORROSIVE_WAKE_START_X[index] = start_x;
+  CORROSIVE_WAKE_START_Y[index] = start_y;
+  CORROSIVE_WAKE_END_X[index] = end_x;
+  CORROSIVE_WAKE_END_Y[index] = end_y;
+  CORROSIVE_WAKE_AGE[index] = 0.0;
+}
+
+static void charge_ball_from_corrosive_wake(int32_t ball, double start_x, double start_y, double end_x, double end_y) {
+  if (!corrosive_wake_unlocked || ball == CHOSEN_BALL_INDEX || BALL_CORROSIVE_WAKE_CHARGED[ball]) return;
+  double radius_squared = CORROSIVE_WAKE_RADIUS * CORROSIVE_WAKE_RADIUS;
+  for (int32_t index = 0; index < corrosive_wake_segment_count; index += 1) {
+    if (segment_distance_squared(
+      start_x, start_y, end_x, end_y,
+      CORROSIVE_WAKE_START_X[index], CORROSIVE_WAKE_START_Y[index],
+      CORROSIVE_WAKE_END_X[index], CORROSIVE_WAKE_END_Y[index]
+    ) <= radius_squared) {
+      BALL_CORROSIVE_WAKE_CHARGED[ball] = 1;
+      return;
+    }
+  }
 }
 
 static int32_t segment_intersects_polygon(
@@ -467,6 +555,35 @@ static int points_close(double ax, double ay, double bx, double by) {
   return dx * dx + dy * dy <= 0.00000025;
 }
 
+static int32_t point_on_field_segment(double x, double y, double ax, double ay, double bx, double by) {
+  double edge_x = bx - ax;
+  double edge_y = by - ay;
+  double length_squared = edge_x * edge_x + edge_y * edge_y;
+  if (length_squared <= 0.000000000001) return 0;
+  double cross = (x - ax) * edge_y - (y - ay) * edge_x;
+  double tolerance = 0.001;
+  if (cross * cross > tolerance * tolerance * length_squared) return 0;
+  double projection = (x - ax) * edge_x + (y - ay) * edge_y;
+  return projection >= -tolerance && projection <= length_squared + tolerance;
+}
+
+static int32_t edge_lies_on_field_boundary(int32_t shard, int32_t edge_index) {
+  int32_t start = shard * MAX_CELL_POINTS;
+  int32_t next = (edge_index + 1) % POINT_COUNT[shard];
+  double ax = POINT_X[start + edge_index];
+  double ay = POINT_Y[start + edge_index];
+  double bx = POINT_X[start + next];
+  double by = POINT_Y[start + next];
+  for (int32_t boundary = 0; boundary < FIELD_BOUNDARY_POINT_COUNT; boundary += 1) {
+    int32_t boundary_next = (boundary + 1) % FIELD_BOUNDARY_POINT_COUNT;
+    if (point_on_field_segment(ax, ay, FIELD_BOUNDARY_X[boundary], FIELD_BOUNDARY_Y[boundary], FIELD_BOUNDARY_X[boundary_next], FIELD_BOUNDARY_Y[boundary_next])
+      && point_on_field_segment(bx, by, FIELD_BOUNDARY_X[boundary], FIELD_BOUNDARY_Y[boundary], FIELD_BOUNDARY_X[boundary_next], FIELD_BOUNDARY_Y[boundary_next])) {
+      return 1;
+    }
+  }
+  return 0;
+}
+
 static int shared_edge_for_shards(
   int32_t first,
   int32_t second,
@@ -519,56 +636,17 @@ static int shared_edge_for_shards(
   return 0;
 }
 
-static int32_t edge_is_shared_with_field(int32_t shard, int32_t edge_index) {
-  int32_t start = shard * MAX_CELL_POINTS;
-  int32_t next = (edge_index + 1) % POINT_COUNT[shard];
-  double ax = POINT_X[start + edge_index];
-  double ay = POINT_Y[start + edge_index];
-  double bx = POINT_X[start + next];
-  double by = POINT_Y[start + next];
-  int32_t source_gx = SHARD_GX[shard];
-  int32_t source_gy = SHARD_GY[shard];
-
-  for (int32_t gy = source_gy - 4; gy <= source_gy + 4; gy += 1) {
-    for (int32_t gx = source_gx - 4; gx <= source_gx + 4; gx += 1) {
-      if (!in_grid(gx, gy)) continue;
-      int32_t candidate = GRID[grid_index(gx, gy)];
-      if (candidate < 0 || candidate == shard) continue;
-      int32_t candidate_start = candidate * MAX_CELL_POINTS;
-      int32_t candidate_count = POINT_COUNT[candidate];
-      for (int32_t candidate_index = 0; candidate_index < candidate_count; candidate_index += 1) {
-        int32_t candidate_next = (candidate_index + 1) % candidate_count;
-        double candidate_ax = POINT_X[candidate_start + candidate_index];
-        double candidate_ay = POINT_Y[candidate_start + candidate_index];
-        double candidate_bx = POINT_X[candidate_start + candidate_next];
-        double candidate_by = POINT_Y[candidate_start + candidate_next];
-        int32_t same_direction = points_close(ax, ay, candidate_ax, candidate_ay)
-          && points_close(bx, by, candidate_bx, candidate_by);
-        int32_t opposite_direction = points_close(ax, ay, candidate_bx, candidate_by)
-          && points_close(bx, by, candidate_ax, candidate_ay);
-        if (same_direction || opposite_direction) return 1;
-      }
-    }
-  }
-  return 0;
-}
-
 static int32_t point_inside_boundary(double x, double y) {
   int32_t inside = 0;
-  for (int32_t shard = 0; shard < shard_count; shard += 1) {
-    int32_t start = shard * MAX_CELL_POINTS;
-    int32_t count = POINT_COUNT[shard];
-    for (int32_t edge = 0; edge < count; edge += 1) {
-      if (!SHARD_BOUNDARY_EDGE[start + edge]) continue;
-      int32_t next = (edge + 1) % count;
-      double ax = POINT_X[start + edge];
-      double ay = POINT_Y[start + edge];
-      double bx = POINT_X[start + next];
-      double by = POINT_Y[start + next];
-      if ((ay > y) == (by > y)) continue;
-      double crossing_x = ax + (y - ay) * (bx - ax) / (by - ay);
-      if (x < crossing_x) inside = !inside;
-    }
+  for (int32_t edge = 0; edge < FIELD_BOUNDARY_POINT_COUNT; edge += 1) {
+    int32_t next = (edge + 1) % FIELD_BOUNDARY_POINT_COUNT;
+    double ax = FIELD_BOUNDARY_X[edge];
+    double ay = FIELD_BOUNDARY_Y[edge];
+    double bx = FIELD_BOUNDARY_X[next];
+    double by = FIELD_BOUNDARY_Y[next];
+    if ((ay > y) == (by > y)) continue;
+    double crossing_x = ax + (y - ay) * (bx - ax) / (by - ay);
+    if (x < crossing_x) inside = !inside;
   }
   return inside;
 }
@@ -584,43 +662,37 @@ static int32_t nearest_boundary_feature(
 ) {
   double best_distance_squared = 1.7976931348623157e+308;
   int32_t found = 0;
-  for (int32_t shard = 0; shard < shard_count; shard += 1) {
-    int32_t start = shard * MAX_CELL_POINTS;
-    int32_t count = POINT_COUNT[shard];
-    for (int32_t edge = 0; edge < count; edge += 1) {
-      if (!SHARD_BOUNDARY_EDGE[start + edge]) continue;
-      int32_t next = (edge + 1) % count;
-      double ax = POINT_X[start + edge];
-      double ay = POINT_Y[start + edge];
-      double bx = POINT_X[start + next];
-      double by = POINT_Y[start + next];
-      double candidate_x, candidate_y;
-      closest_point_on_segment(x, y, ax, ay, bx, by, &candidate_x, &candidate_y);
-      double offset_x = x - candidate_x;
-      double offset_y = y - candidate_y;
-      double distance_squared = offset_x * offset_x + offset_y * offset_y;
-      if (distance_squared >= best_distance_squared) continue;
+  for (int32_t edge = 0; edge < FIELD_BOUNDARY_POINT_COUNT; edge += 1) {
+    int32_t next = (edge + 1) % FIELD_BOUNDARY_POINT_COUNT;
+    double ax = FIELD_BOUNDARY_X[edge];
+    double ay = FIELD_BOUNDARY_Y[edge];
+    double bx = FIELD_BOUNDARY_X[next];
+    double by = FIELD_BOUNDARY_Y[next];
+    double candidate_x, candidate_y;
+    closest_point_on_segment(x, y, ax, ay, bx, by, &candidate_x, &candidate_y);
+    double offset_x = x - candidate_x;
+    double offset_y = y - candidate_y;
+    double distance_squared = offset_x * offset_x + offset_y * offset_y;
+    if (distance_squared >= best_distance_squared) continue;
 
-      double edge_x = bx - ax;
-      double edge_y = by - ay;
-      double candidate_inward_x = -edge_y;
-      double candidate_inward_y = edge_x;
-      double midpoint_x = (ax + bx) / 2.0;
-      double midpoint_y = (ay + by) / 2.0;
-      if (candidate_inward_x * (SHARD_SX[shard] - midpoint_x)
-        + candidate_inward_y * (SHARD_SY[shard] - midpoint_y) < 0.0) {
-        candidate_inward_x = -candidate_inward_x;
-        candidate_inward_y = -candidate_inward_y;
-      }
-      double length = sqrt(candidate_inward_x * candidate_inward_x + candidate_inward_y * candidate_inward_y);
-      if (length <= 0.000000001) continue;
-      best_distance_squared = distance_squared;
-      *point_x = candidate_x;
-      *point_y = candidate_y;
-      *inward_x = candidate_inward_x / length;
-      *inward_y = candidate_inward_y / length;
-      found = 1;
+    double edge_x = bx - ax;
+    double edge_y = by - ay;
+    double candidate_inward_x = -edge_y;
+    double candidate_inward_y = edge_x;
+    double midpoint_x = (ax + bx) / 2.0;
+    double midpoint_y = (ay + by) / 2.0;
+    if (candidate_inward_x * (-midpoint_x) + candidate_inward_y * (-midpoint_y) < 0.0) {
+      candidate_inward_x = -candidate_inward_x;
+      candidate_inward_y = -candidate_inward_y;
     }
+    double length = sqrt(candidate_inward_x * candidate_inward_x + candidate_inward_y * candidate_inward_y);
+    if (length <= 0.000000001) continue;
+    best_distance_squared = distance_squared;
+    *point_x = candidate_x;
+    *point_y = candidate_y;
+    *inward_x = candidate_inward_x / length;
+    *inward_y = candidate_inward_y / length;
+    found = 1;
   }
   if (found) *distance = sqrt(best_distance_squared);
   return found;
@@ -737,16 +809,30 @@ static void initialize_field(double field_seed) {
   current_field_seed = field_seed;
   damaged_shard_count = 0;
   for (int32_t index = 0; index < GRID_CELLS; index += 1) GRID[index] = -1;
+  build_field_boundary(field_seed);
   for (int32_t gy = GRID_MIN; gy <= GRID_MAX; gy += 1) {
     for (int32_t gx = GRID_MIN; gx <= GRID_MAX; gx += 1) {
-      if (sqrt((double)gx * gx + (double)gy * gy) > FIELD_SITE_RADIUS) continue;
+      if (!field_site_included(gx, gy)) continue;
+      double cell_x[MAX_CELL_POINTS];
+      double cell_y[MAX_CELL_POINTS];
+      double site_x;
+      double site_y;
+      int32_t point_count = build_cell(gx, gy, field_seed, &site_x, &site_y, cell_x, cell_y);
+      if (point_count < 3) continue;
+
       int32_t shard = shard_count++;
       int32_t grid_slot = grid_index(gx, gy);
       GRID[grid_slot] = shard;
       SHARD_GX[shard] = gx;
       SHARD_GY[shard] = gy;
       int32_t point_start = shard * MAX_CELL_POINTS;
-      POINT_COUNT[shard] = build_cell(gx, gy, field_seed, &SHARD_SX[shard], &SHARD_SY[shard], POINT_X + point_start, POINT_Y + point_start);
+      SHARD_SX[shard] = site_x;
+      SHARD_SY[shard] = site_y;
+      POINT_COUNT[shard] = point_count;
+      for (int32_t point = 0; point < point_count; point += 1) {
+        POINT_X[point_start + point] = cell_x[point];
+        POINT_Y[point_start + point] = cell_y[point];
+      }
       CENTER_X[shard] = SHARD_SX[shard];
       CENTER_Y[shard] = SHARD_SY[shard];
       SHARD_HEALTH[shard] = SHARD_MAX_HEALTH;
@@ -764,7 +850,7 @@ static void initialize_field(double field_seed) {
   for (int32_t shard = 0; shard < shard_count; shard += 1) {
     int32_t edge_start = shard * MAX_CELL_POINTS;
     for (int32_t edge = 0; edge < POINT_COUNT[shard]; edge += 1) {
-      SHARD_BOUNDARY_EDGE[edge_start + edge] = edge_is_shared_with_field(shard, edge) ? 0 : 1;
+      SHARD_BOUNDARY_EDGE[edge_start + edge] = edge_lies_on_field_boundary(shard, edge);
     }
   }
 }
@@ -783,10 +869,12 @@ static void initialize_balls(uint32_t seed, double field_seed_override, int32_t 
   simulation_time = 0.0;
   next_impact_id = 1;
   chosen_one_unlocked = 0;
+  corrosive_wake_unlocked = 0;
   new_growth_unlocked = 0;
   resonance_unlocked = 0;
   conduction_unlocked = 0;
   event_count = 0;
+  corrosive_wake_segment_count = 0;
 
   double initial_direction = rng_next() * TAU;
   BALL_X[0] = 0.0;
@@ -794,6 +882,7 @@ static void initialize_balls(uint32_t seed, double field_seed_override, int32_t 
   BALL_VX[0] = cos(initial_direction) * INITIAL_BALL_SPEED;
   BALL_VY[0] = sin(initial_direction) * INITIAL_BALL_SPEED;
   BALL_HIT_COOLDOWN[0] = 0.0;
+  BALL_CORROSIVE_WAKE_CHARGED[0] = 0;
   ball_count = 1;
 
   while (ball_count < requested_balls && ball_count < MAX_BALLS) {
@@ -808,6 +897,7 @@ static void initialize_balls(uint32_t seed, double field_seed_override, int32_t 
     BALL_VX[current_count] = cos(direction) * INITIAL_BALL_SPEED;
     BALL_VY[current_count] = sin(direction) * INITIAL_BALL_SPEED;
     BALL_HIT_COOLDOWN[current_count] = 0.0;
+    BALL_CORROSIVE_WAKE_CHARGED[current_count] = 0;
     ball_count += 1;
   }
 }
@@ -918,7 +1008,7 @@ static void consider_boundary_edge_collision(
   double inward_y = edge_x;
   double midpoint_x = (ax + bx) / 2.0;
   double midpoint_y = (ay + by) / 2.0;
-  if (inward_x * (SHARD_SX[shard] - midpoint_x) + inward_y * (SHARD_SY[shard] - midpoint_y) < 0.0) {
+  if (inward_x * (-midpoint_x) + inward_y * (-midpoint_y) < 0.0) {
     inward_x = -inward_x;
     inward_y = -inward_y;
   }
@@ -983,6 +1073,15 @@ static Collision collision_for(double x, double y, double next_x, double next_y,
   if ((y > next_y ? y : next_y) > (double)max_y) max_y += 1;
   max_y += 1;
 
+  for (int32_t shard = 0; shard < shard_count; shard += 1) {
+    int32_t count = POINT_COUNT[shard];
+    int32_t start = shard * MAX_CELL_POINTS;
+    for (int32_t index = 0; index < count; index += 1) {
+      if (!SHARD_BOUNDARY_EDGE[start + index]) continue;
+      consider_boundary_edge_collision(&best, shard, index, x, y, movement_x, movement_y, radius);
+    }
+  }
+
   for (int32_t gy = min_y; gy <= max_y; gy += 1) {
     for (int32_t gx = min_x; gx <= max_x; gx += 1) {
       if (!in_grid(gx, gy)) continue;
@@ -990,10 +1089,6 @@ static Collision collision_for(double x, double y, double next_x, double next_y,
       if (shard < 0) continue;
       int32_t count = POINT_COUNT[shard];
       int32_t start = shard * MAX_CELL_POINTS;
-      for (int32_t index = 0; index < count; index += 1) {
-        if (!SHARD_BOUNDARY_EDGE[start + index]) continue;
-        consider_boundary_edge_collision(&best, shard, index, x, y, movement_x, movement_y, radius);
-      }
       if (SHARD_BROKEN[shard]) continue;
       int32_t start_inside = point_in_polygon(x, y, shard);
       Feature nearest_start = nearest_feature(x, y, shard);
@@ -1086,6 +1181,9 @@ static Collision collision_for(double x, double y, double next_x, double next_y,
   return best;
 }
 
+// RETAINED LEGACY NEW GROWTH IMPLEMENTATION: this path is intentionally
+// inactive while the branch is repurposed as Corrosive Wake. Keep it nearby so
+// the empty-cell growth behavior can be reused in a later tech.
 static void process_growth_path(int32_t ball, double x, double y, double next_x, double next_y) {
   if (!new_growth_unlocked && damaged_shard_count == 0) return;
   int32_t min_x = (int32_t)floor(x < next_x ? x : next_x) - 1;
@@ -1121,6 +1219,7 @@ static void process_growth_path(int32_t ball, double x, double y, double next_x,
 static void step_simulation(void) {
   simulation_time += FIXED_TIMESTEP;
   recent_break_rate *= exp(-FIXED_TIMESTEP / RECENT_BREAK_RATE_TIME_CONSTANT_SECONDS);
+  refresh_corrosive_wake();
   event_count = 0;
   for (int32_t ball = 0; ball < ball_count; ball += 1) {
     BALL_HIT_COOLDOWN[ball] -= FIXED_TIMESTEP;
@@ -1130,13 +1229,17 @@ static void step_simulation(void) {
     while (remaining > 0.000001 && collision_count < MAX_COLLISIONS_PER_STEP) {
       double next_x = BALL_X[ball] + BALL_VX[ball] * remaining;
       double next_y = BALL_Y[ball] + BALL_VY[ball] * remaining;
-      process_growth_path(ball, BALL_X[ball], BALL_Y[ball], next_x, next_y);
+      if (ball != CHOSEN_BALL_INDEX) {
+        charge_ball_from_corrosive_wake(ball, BALL_X[ball], BALL_Y[ball], next_x, next_y);
+      }
       Collision collision = collision_for(BALL_X[ball], BALL_Y[ball], next_x, next_y, BASE_BALL_RADIUS);
       if (!collision.valid) {
+        if (ball == CHOSEN_BALL_INDEX) add_corrosive_wake_segment(BALL_X[ball], BALL_Y[ball], next_x, next_y);
         BALL_X[ball] = next_x;
         BALL_Y[ball] = next_y;
         break;
       }
+      if (ball == CHOSEN_BALL_INDEX) add_corrosive_wake_segment(BALL_X[ball], BALL_Y[ball], collision.point_x, collision.point_y);
       double velocity_along_normal = BALL_VX[ball] * collision.normal_x + BALL_VY[ball] * collision.normal_y;
       BALL_X[ball] = collision.point_x + collision.normal_x * (BASE_BALL_RADIUS + COLLISION_SEPARATION);
       BALL_Y[ball] = collision.point_y + collision.normal_y * (BASE_BALL_RADIUS + COLLISION_SEPARATION);
@@ -1155,6 +1258,10 @@ static void step_simulation(void) {
           if (BALL_HIT_COOLDOWN[ball] <= 0.0) {
             double direct_damage = BASE_HIT_DAMAGE;
             if (chosen_one_unlocked && ball == CHOSEN_BALL_INDEX) direct_damage *= CHOSEN_ONE_DAMAGE_MULTIPLIER;
+            if (BALL_CORROSIVE_WAKE_CHARGED[ball]) {
+              direct_damage *= CHOSEN_ONE_DAMAGE_MULTIPLIER;
+              BALL_CORROSIVE_WAKE_CHARGED[ball] = 0;
+            }
             damage_shard(collision.shard, direct_damage, collision.point_x, collision.point_y, -collision.normal_x, -collision.normal_y, 1);
             BALL_HIT_COOLDOWN[ball] = 0.14;
           }
@@ -1225,6 +1332,7 @@ __attribute__((export_name("add_ball"))) int32_t add_ball(void) {
   BALL_VX[index] = cos(direction) * INITIAL_BALL_SPEED;
   BALL_VY[index] = sin(direction) * INITIAL_BALL_SPEED;
   BALL_HIT_COOLDOWN[index] = 0.0;
+  BALL_CORROSIVE_WAKE_CHARGED[index] = 0;
   ball_count += 1;
   return 1;
 }
@@ -1237,8 +1345,15 @@ __attribute__((export_name("set_tech_chosen_one_state"))) void set_tech_chosen_o
   chosen_one_unlocked = enabled ? 1 : 0;
 }
 
+__attribute__((export_name("set_tech_corrosive_wake_state"))) void set_tech_corrosive_wake_state(int32_t enabled) {
+  corrosive_wake_unlocked = enabled && chosen_one_unlocked ? 1 : 0;
+}
+
+// Legacy New Growth exports are retained as compatibility shims for older
+// front ends. They now address Corrosive Wake; the old growth implementation
+// itself remains inactive and available for future repurposing.
 __attribute__((export_name("set_tech_new_growth_state"))) void set_tech_new_growth_state(int32_t enabled) {
-  new_growth_unlocked = enabled && chosen_one_unlocked ? 1 : 0;
+  corrosive_wake_unlocked = enabled && chosen_one_unlocked ? 1 : 0;
 }
 
 __attribute__((export_name("set_tech_conduction_state"))) void set_tech_conduction_state(int32_t enabled) {
@@ -1253,23 +1368,27 @@ __attribute__((export_name("set_tech_chosen_one"))) int32_t set_tech_chosen_one(
     return 1;
   }
   if (!chosen_one_unlocked) return 0;
-  if (new_growth_unlocked) return 0;
+  if (corrosive_wake_unlocked) return 0;
   score += CHOSEN_ONE_COST;
   chosen_one_unlocked = 0;
   return 1;
 }
 
-__attribute__((export_name("set_tech_new_growth"))) int32_t set_tech_new_growth(int32_t enabled) {
+__attribute__((export_name("set_tech_corrosive_wake"))) int32_t set_tech_corrosive_wake(int32_t enabled) {
   if (enabled) {
-    if (!chosen_one_unlocked || new_growth_unlocked || score < NEW_GROWTH_COST) return 0;
-    score -= NEW_GROWTH_COST;
-    new_growth_unlocked = 1;
+    if (!chosen_one_unlocked || corrosive_wake_unlocked || score < CORROSIVE_WAKE_COST) return 0;
+    score -= CORROSIVE_WAKE_COST;
+    corrosive_wake_unlocked = 1;
     return 1;
   }
-  if (!new_growth_unlocked) return 0;
-  score += NEW_GROWTH_COST;
-  new_growth_unlocked = 0;
+  if (!corrosive_wake_unlocked) return 0;
+  score += CORROSIVE_WAKE_COST;
+  corrosive_wake_unlocked = 0;
   return 1;
+}
+
+__attribute__((export_name("set_tech_new_growth"))) int32_t set_tech_new_growth(int32_t enabled) {
+  return set_tech_corrosive_wake(enabled);
 }
 
 __attribute__((export_name("set_tech_resonance"))) int32_t set_tech_resonance(int32_t enabled) {
@@ -1315,10 +1434,14 @@ __attribute__((export_name("set_ball_state"))) void set_ball_state(int32_t index
   if (index < 0 || index >= MAX_BALLS) return;
   BALL_X[index] = x; BALL_Y[index] = y; BALL_VX[index] = vx; BALL_VY[index] = vy; BALL_HIT_COOLDOWN[index] = cooldown;
 }
+__attribute__((export_name("set_ball_corrosive_wake_charge"))) void set_ball_corrosive_wake_charge(int32_t index, int32_t charged) {
+  if (index < 0 || index >= MAX_BALLS) return;
+  BALL_CORROSIVE_WAKE_CHARGED[index] = charged ? 1 : 0;
+}
 __attribute__((export_name("contain_ball"))) void contain_ball_state(int32_t index) { contain_ball(index); }
 __attribute__((export_name("set_all_shards_broken"))) void set_all_shards_broken(int32_t broken) {
   for (int32_t index = 0; index < shard_count; index += 1) {
-    SHARD_BROKEN[index] = broken ? 1 : 0;
+    SHARD_BROKEN[index] = POINT_COUNT[index] < 3 ? 1 : (broken ? 1 : 0);
     if (broken) {
       SHARD_GROWTH[index] = 0.0;
       SHARD_GROWING[index] = 0;
@@ -1328,7 +1451,7 @@ __attribute__((export_name("set_all_shards_broken"))) void set_all_shards_broken
 }
 __attribute__((export_name("set_shard_broken"))) void set_shard_broken(int32_t shard, int32_t broken) {
   if (shard >= 0 && shard < shard_count) {
-    SHARD_BROKEN[shard] = broken ? 1 : 0;
+    SHARD_BROKEN[shard] = POINT_COUNT[shard] < 3 ? 1 : (broken ? 1 : 0);
     if (broken) {
       SHARD_GROWTH[shard] = 0.0;
       SHARD_GROWING[shard] = 0;
@@ -1362,7 +1485,8 @@ __attribute__((export_name("set_shard_impact"))) void set_shard_impact(int32_t s
 
 __attribute__((export_name("get_score"))) double get_score(void) { return score; }
 __attribute__((export_name("get_tech_chosen_one"))) int32_t get_tech_chosen_one(void) { return chosen_one_unlocked; }
-__attribute__((export_name("get_tech_new_growth"))) int32_t get_tech_new_growth(void) { return new_growth_unlocked; }
+__attribute__((export_name("get_tech_corrosive_wake"))) int32_t get_tech_corrosive_wake(void) { return corrosive_wake_unlocked; }
+__attribute__((export_name("get_tech_new_growth"))) int32_t get_tech_new_growth(void) { return corrosive_wake_unlocked; }
 __attribute__((export_name("get_tech_resonance"))) int32_t get_tech_resonance(void) { return resonance_unlocked; }
 __attribute__((export_name("get_tech_conduction"))) int32_t get_tech_conduction(void) { return conduction_unlocked; }
 __attribute__((export_name("get_total_hits"))) int32_t get_total_hits(void) { return total_hits; }
@@ -1383,6 +1507,9 @@ __attribute__((export_name("get_shard_gx"))) int32_t get_shard_gx(int32_t index)
 __attribute__((export_name("get_shard_gy"))) int32_t get_shard_gy(int32_t index) { return index >= 0 && index < shard_count ? SHARD_GY[index] : 0; }
 __attribute__((export_name("get_shard_sx"))) double get_shard_sx(int32_t index) { return index >= 0 && index < shard_count ? SHARD_SX[index] : 0.0; }
 __attribute__((export_name("get_shard_sy"))) double get_shard_sy(int32_t index) { return index >= 0 && index < shard_count ? SHARD_SY[index] : 0.0; }
+__attribute__((export_name("get_field_boundary_point_count"))) int32_t get_field_boundary_point_count(void) { return FIELD_BOUNDARY_POINT_COUNT; }
+__attribute__((export_name("get_field_boundary_point_x"))) double get_field_boundary_point_x(int32_t index) { return index >= 0 && index < FIELD_BOUNDARY_POINT_COUNT ? FIELD_BOUNDARY_X[index] : 0.0; }
+__attribute__((export_name("get_field_boundary_point_y"))) double get_field_boundary_point_y(int32_t index) { return index >= 0 && index < FIELD_BOUNDARY_POINT_COUNT ? FIELD_BOUNDARY_Y[index] : 0.0; }
 __attribute__((export_name("get_shard_hue"))) double get_shard_hue(int32_t index) { return index >= 0 && index < shard_count ? SHARD_HUE[index] : 0.0; }
 __attribute__((export_name("get_shard_seed"))) double get_shard_seed(int32_t index) { return index >= 0 && index < shard_count ? SHARD_SEED[index] : 0.0; }
 __attribute__((export_name("get_shard_point_count"))) int32_t get_shard_point_count(int32_t index) { return index >= 0 && index < shard_count ? POINT_COUNT[index] : 0; }
@@ -1406,6 +1533,13 @@ __attribute__((export_name("get_shard_impact_inward_x"))) double get_shard_impac
 __attribute__((export_name("get_shard_impact_inward_y"))) double get_shard_impact_inward_y(int32_t shard, int32_t impact) { return shard >= 0 && shard < shard_count && impact >= 0 && impact < SHARD_IMPACT_COUNT[shard] ? SHARD_IMPACT_INWARD_Y[shard * MAX_IMPACTS + impact] : 0.0; }
 __attribute__((export_name("get_shard_impact_strength"))) double get_shard_impact_strength(int32_t shard, int32_t impact) { return shard >= 0 && shard < shard_count && impact >= 0 && impact < SHARD_IMPACT_COUNT[shard] ? SHARD_IMPACT_STRENGTH[shard * MAX_IMPACTS + impact] : 0.0; }
 __attribute__((export_name("get_arrow_hit_cooldown"))) double get_arrow_hit_cooldown(int32_t index) { return index >= 0 && index < ball_count ? BALL_HIT_COOLDOWN[index] : 0.0; }
+__attribute__((export_name("get_ball_corrosive_wake_charge"))) int32_t get_ball_corrosive_wake_charge(int32_t index) { return index >= 0 && index < ball_count ? BALL_CORROSIVE_WAKE_CHARGED[index] : 0; }
+__attribute__((export_name("get_corrosive_wake_count"))) int32_t get_corrosive_wake_count(void) { return corrosive_wake_segment_count; }
+__attribute__((export_name("get_corrosive_wake_start_x"))) double get_corrosive_wake_start_x(int32_t index) { return index >= 0 && index < corrosive_wake_segment_count ? CORROSIVE_WAKE_START_X[index] : 0.0; }
+__attribute__((export_name("get_corrosive_wake_start_y"))) double get_corrosive_wake_start_y(int32_t index) { return index >= 0 && index < corrosive_wake_segment_count ? CORROSIVE_WAKE_START_Y[index] : 0.0; }
+__attribute__((export_name("get_corrosive_wake_end_x"))) double get_corrosive_wake_end_x(int32_t index) { return index >= 0 && index < corrosive_wake_segment_count ? CORROSIVE_WAKE_END_X[index] : 0.0; }
+__attribute__((export_name("get_corrosive_wake_end_y"))) double get_corrosive_wake_end_y(int32_t index) { return index >= 0 && index < corrosive_wake_segment_count ? CORROSIVE_WAKE_END_Y[index] : 0.0; }
+__attribute__((export_name("get_corrosive_wake_age"))) double get_corrosive_wake_age(int32_t index) { return index >= 0 && index < corrosive_wake_segment_count ? CORROSIVE_WAKE_AGE[index] : 0.0; }
 __attribute__((export_name("get_ball_x"))) double get_ball_x(int32_t index) { return index >= 0 && index < ball_count ? BALL_X[index] : 0.0; }
 __attribute__((export_name("get_ball_y"))) double get_ball_y(int32_t index) { return index >= 0 && index < ball_count ? BALL_Y[index] : 0.0; }
 __attribute__((export_name("get_ball_vx"))) double get_ball_vx(int32_t index) { return index >= 0 && index < ball_count ? BALL_VX[index] : 0.0; }

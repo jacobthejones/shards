@@ -3,6 +3,7 @@ import {
   type DynamicShardState,
   type Simulation,
 } from "./simulation";
+import { LEGACY_TECH_IDS, TECH_IDS } from "./tech-tree";
 
 export enum SaveStateVersion {
   V1 = 1,
@@ -81,8 +82,15 @@ const arrowValue = (value: unknown): Arrow => {
     vy: finiteNumber(value.vy, "arrow.vy"),
     hue: finiteNumber(value.hue, "arrow.hue"),
     hitCooldown: finiteNumber(value.hitCooldown, "arrow.hitCooldown"),
+    corrosiveWakeCharged: value.corrosiveWakeCharged === undefined
+      ? false
+      : booleanValue(value.corrosiveWakeCharged, "arrow.corrosiveWakeCharged"),
   };
 };
+
+const normalizeTechId = (tech: string) => tech === LEGACY_TECH_IDS.NEW_GROWTH
+  ? TECH_IDS.CORROSIVE_WAKE
+  : tech;
 
 const impactValue = (value: unknown) => {
   if (!isRecord(value)) throw new Error("Invalid save impact");
@@ -143,7 +151,7 @@ const migrateV2 = (value: unknown): SaveState => {
   return {
     ...migrated,
     version: SaveStateVersion.V3,
-    unlockedTechs: value.unlockedTechs.map((tech) => stringValue(tech, "unlocked tech")),
+    unlockedTechs: value.unlockedTechs.map((tech) => normalizeTechId(stringValue(tech, "unlocked tech"))),
   };
 };
 
@@ -155,7 +163,7 @@ const migrateV3 = (value: unknown): SaveState => {
   return {
     ...migrated,
     version: SaveStateVersion.V3,
-    unlockedTechs: value.unlockedTechs.map((tech) => stringValue(tech, "unlocked tech")),
+    unlockedTechs: value.unlockedTechs.map((tech) => normalizeTechId(stringValue(tech, "unlocked tech"))),
     shards: value.shards.map((shard) => dynamicShardValue(shard, true)),
   };
 };

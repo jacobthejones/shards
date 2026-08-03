@@ -39,6 +39,25 @@ const boundaryContainsPoint = (wasm: Record<string, (...args: number[]) => numbe
   return inside;
 };
 
+const readFieldBoundary = (wasm: Record<string, (...args: number[]) => number>) => {
+  const count = wasm.get_field_boundary_point_count();
+  return Array.from({ length: count }, (_, index) => [
+    wasm.get_field_boundary_point_x(index),
+    wasm.get_field_boundary_point_y(index),
+  ] as [number, number]);
+};
+
+const pointOnBoundarySide = (point: [number, number], first: [number, number], second: [number, number]) => {
+  const edgeX = second[0] - first[0];
+  const edgeY = second[1] - first[1];
+  const lengthSquared = edgeX * edgeX + edgeY * edgeY;
+  const cross = (point[0] - first[0]) * edgeY - (point[1] - first[1]) * edgeX;
+  const projection = (point[0] - first[0]) * edgeX + (point[1] - first[1]) * edgeY;
+  return cross * cross <= 0.001 * 0.001 * lengthSquared
+    && projection >= -0.001
+    && projection <= lengthSquared + 0.001;
+};
+
 test("the shipped C++ runtime initializes a contiguous Voronoi field", async () => {
   const wasm = await loadRuntime();
   wasm.initialize_real_simulation(1234, 5678, 1);
@@ -79,6 +98,7 @@ test("the permanent boundary follows every exposed Voronoi edge", async () => {
   const wasm = await loadRuntime();
   wasm.initialize_real_simulation(1234, 5678, 1);
   const shardCount = wasm.get_shard_count();
+  const fieldBoundary = readFieldBoundary(wasm);
   const edgeCounts = new Map<string, { count: number; boundaryFlags: number }>();
   const pointKey = (x: number, y: number) => `${Math.round(x * 100_000)},${Math.round(y * 100_000)}`;
   for (let shard = 0; shard < shardCount; shard += 1) {
@@ -97,24 +117,53 @@ test("the permanent boundary follows every exposed Voronoi edge", async () => {
 
   let exposedEdges = 0;
   let sharedEdges = 0;
-  const boundaryVertexDegrees = new Map<string, number>();
+  const coveredBoundarySides = new Set<number>();
   edgeCounts.forEach(({ count, boundaryFlags }, key) => {
     assert.ok(count === 1 || count === 2, "every Voronoi edge should be exposed or shared by exactly two shards");
     if (count === 1) {
       exposedEdges += 1;
       assert.equal(boundaryFlags, 1);
-      key.split("|").forEach((point) => boundaryVertexDegrees.set(point, (boundaryVertexDegrees.get(point) ?? 0) + 1));
     } else {
       sharedEdges += 1;
-      assert.equal(boundaryFlags, 0);
+      assert.ok(boundaryFlags === 0 || boundaryFlags === 2, "a shared edge may only be gold when it is a duplicated outer-boundary segment");
     }
+    if (boundaryFlags === 0) return;
+    const [firstKey, secondKey] = key.split("|");
+    const first = firstKey.split(",").map((value) => Number(value) / 100_000) as [number, number];
+    const second = secondKey.split(",").map((value) => Number(value) / 100_000) as [number, number];
+    fieldBoundary.forEach((point, index) => {
+      const next = fieldBoundary[(index + 1) % fieldBoundary.length];
+      if (pointOnBoundarySide(first, point, next) && pointOnBoundarySide(second, point, next)) coveredBoundarySides.add(index);
+    });
   });
   assert.ok(exposedEdges > 100);
   assert.ok(sharedEdges > exposedEdges);
-  boundaryVertexDegrees.forEach((degree) => assert.equal(degree, 2, "the gold boundary must form a closed perimeter"));
+  assert.equal(coveredBoundarySides.size, fieldBoundary.length, "every side of the single generated perimeter must be represented by gold boundary edges");
 
   wasm.set_all_shards_broken(1);
   for (let shard = 0; shard < shardCount; shard += 1) assert.equal(wasm.is_shard_broken(shard), 1);
+});
+
+test("randomized field boundaries remain single-loop, convex, and irregular", async () => {
+  const wasm = await loadRuntime();
+  for (let seed = 1; seed <= 100; seed += 1) {
+    wasm.initialize_real_simulation(seed, seed * 97.31, 1);
+    const boundary = readFieldBoundary(wasm);
+    assert.equal(boundary.length, 32);
+    let positiveTurns = 0;
+    for (let index = 0; index < boundary.length; index += 1) {
+      const previous = boundary[(index + boundary.length - 1) % boundary.length];
+      const current = boundary[index];
+      const next = boundary[(index + 1) % boundary.length];
+      const turn = (current[0] - previous[0]) * (next[1] - current[1])
+        - (current[1] - previous[1]) * (next[0] - current[0]);
+      assert.ok(turn > -0.0001, "the perimeter must not have inward notches");
+      if (turn > 0.0001) positiveTurns += 1;
+    }
+    assert.ok(positiveTurns > 0, "the perimeter should have visible angular variation");
+    const radii = boundary.map(([x, y]) => Math.hypot(x, y));
+    assert.ok(Math.max(...radii) - Math.min(...radii) > 0.1, "the perimeter should not be a perfect circle");
+  }
 });
 
 test("the permanent boundary reflects balls after every shard is broken", async () => {
@@ -147,8 +196,7 @@ test("the permanent boundary reflects balls after every shard is broken", async 
   const midpointY = (boundary.ay + boundary.by) / 2;
   let inwardX = -edgeY / edgeLength;
   let inwardY = edgeX / edgeLength;
-  if (inwardX * (wasm.get_shard_sx(boundary.shard) - midpointX)
-    + inwardY * (wasm.get_shard_sy(boundary.shard) - midpointY) < 0) {
+  if (inwardX * -midpointX + inwardY * -midpointY < 0) {
     inwardX = -inwardX;
     inwardY = -inwardY;
   }
@@ -233,14 +281,6 @@ const advanceToEvent = (wasm: Record<string, (...args: number[]) => number>, eve
   assert.fail(`event type ${eventType} did not occur during the collision setup`);
 };
 
-const advanceUntilGrowing = (wasm: Record<string, (...args: number[]) => number>, shard: number) => {
-  for (let step = 0; step < 240; step += 1) {
-    wasm.step_real_simulation(1);
-    if (wasm.get_shard_growing(shard) !== 0) return;
-  }
-  assert.fail("shard did not begin growing after the chosen ball passed through it");
-};
-
 test("The Chosen One purchase and refund use the original ball", async () => {
   const wasm = await loadRuntime();
   wasm.initialize_real_simulation(7, 77, 2);
@@ -253,106 +293,65 @@ test("The Chosen One purchase and refund use the original ball", async () => {
   assert.equal(wasm.get_score(), 10_000);
 });
 
-test("New Growth requires The Chosen One and refunds its full cost", async () => {
+test("Corrosive Wake requires The Chosen One and refunds its full cost", async () => {
   const wasm = await loadRuntime();
   wasm.initialize_real_simulation(7, 77, 1);
   wasm.set_score(50_000);
-  assert.equal(wasm.set_tech_new_growth(1), 0);
-  assert.equal(wasm.get_tech_new_growth(), 0);
+  assert.equal(wasm.set_tech_corrosive_wake(1), 0);
+  assert.equal(wasm.get_tech_corrosive_wake(), 0);
 
   wasm.set_tech_chosen_one_state(1);
-  assert.equal(wasm.set_tech_new_growth(1), 1);
-  assert.equal(wasm.get_tech_new_growth(), 1);
+  assert.equal(wasm.set_tech_corrosive_wake(1), 1);
+  assert.equal(wasm.get_tech_corrosive_wake(), 1);
   assert.equal(wasm.get_score(), 0);
   assert.equal(wasm.set_tech_chosen_one(0), 0);
-  assert.equal(wasm.set_tech_new_growth(0), 1);
-  assert.equal(wasm.get_tech_new_growth(), 0);
+  assert.equal(wasm.set_tech_corrosive_wake(0), 1);
+  assert.equal(wasm.get_tech_corrosive_wake(), 0);
   assert.equal(wasm.get_score(), 50_000);
 });
 
-test("New Growth starts only when the chosen ball sweeps through an empty cell", async () => {
+test("Corrosive Wake is left by the chosen ball and charges another ball", async () => {
   const wasm = await loadRuntime();
   wasm.initialize_real_simulation(7, 77, 2);
   wasm.set_tech_chosen_one_state(1);
-  wasm.set_tech_new_growth_state(1);
+  wasm.set_tech_corrosive_wake_state(1);
   wasm.set_all_shards_broken(1);
-  wasm.set_ball_state(0, 0, 0, -1.4366976021418008, 0, 0);
+  wasm.set_ball_state(0, 0, 0, 1, 0, 0);
   wasm.set_ball_state(1, 100, 100, 0, 0, 0);
 
   wasm.step_real_simulation(1);
-
-  const centerShard = centerShardIndexFor(wasm);
-  assert.equal(wasm.get_shard_growing(centerShard), 0);
-  let growthEvents = 0;
-  for (let step = 0; step < 120 && wasm.get_shard_growing(centerShard) === 0; step += 1) {
-    wasm.step_real_simulation(1);
-    for (let index = 0; index < wasm.get_event_count(); index += 1) {
-      if (wasm.get_event_type(index) === 5) growthEvents += 1;
-    }
-  }
-  assert.ok(growthEvents > 0);
-  assert.equal(wasm.is_shard_broken(centerShard), 1);
-  assert.equal(wasm.get_shard_growing(centerShard), 1);
-  assert.ok(wasm.get_shard_growth(centerShard) > 0.5);
-  assert.ok(wasm.get_shard_growth(centerShard) < 0.501);
+  assert.ok(wasm.get_corrosive_wake_count() > 0);
 
   wasm.set_ball_state(0, 100, 100, 0, 0, 0);
-  wasm.step_real_simulation(60);
-  assert.ok(wasm.get_shard_growth(centerShard) > 0.509);
-  assert.ok(wasm.get_shard_growth(centerShard) < 0.512);
+  wasm.set_ball_state(1, 0, 0, 1, 0, 0);
+  wasm.step_real_simulation(1);
+  assert.equal(wasm.get_ball_corrosive_wake_charge(1), 1);
 
-  wasm.step_real_simulation(6_000);
-  assert.equal(wasm.is_shard_broken(centerShard), 0);
-  assert.equal(wasm.get_shard_growing(centerShard), 0);
-  assert.equal(wasm.get_shard_growth(centerShard), 0);
-  assert.equal(wasm.get_shard_health(centerShard), 1);
+  prepareSingleCollision(wasm, false);
+  wasm.set_ball_state(0, 100, 100, 0, 0, 0);
+  wasm.set_ball_state(1, 0, 0, -1.4366976021418008, 0, 0);
+  advanceToEvent(wasm, 3);
+  assert.equal(wasm.get_total_breaks(), 1, "a charged ball should instabreak its next shard");
+  assert.equal(wasm.get_ball_corrosive_wake_charge(1), 0);
 });
 
-test("A ball passing through a growing cell resets it without reflecting", async () => {
+test("Corrosive Wake fades and only the chosen ball creates it", async () => {
   const wasm = await loadRuntime();
   wasm.initialize_real_simulation(7, 77, 2);
   wasm.set_tech_chosen_one_state(1);
-  wasm.set_tech_new_growth_state(1);
+  wasm.set_tech_corrosive_wake_state(1);
   wasm.set_all_shards_broken(1);
-  wasm.set_ball_state(0, 0, 0, -1.4366976021418008, 0, 0);
+  wasm.set_ball_state(0, 100, 100, 0, 0, 0);
   wasm.set_ball_state(1, 100, 100, 0, 0, 0);
-  const centerShard = centerShardIndexFor(wasm);
   wasm.step_real_simulation(1);
-  advanceUntilGrowing(wasm, centerShard);
+  assert.equal(wasm.get_corrosive_wake_count(), 0);
 
-  wasm.set_ball_state(0, 100, 100, 0, 0, 0);
-  wasm.set_ball_state(1, 0, 0, -1.4366976021418008, 0, 0);
-  const beforeX = wasm.get_ball_x(1);
+  wasm.set_ball_state(0, 0, 0, 1, 0, 0);
   wasm.step_real_simulation(1);
-
-  let growthBreakEvents = 0;
-  let collisionEvents = 0;
-  for (let index = 0; index < wasm.get_event_count(); index += 1) {
-    if (wasm.get_event_type(index) === 6) growthBreakEvents += 1;
-    if (wasm.get_event_type(index) === 1) collisionEvents += 1;
-  }
-  assert.equal(wasm.get_shard_growing(centerShard), 0);
-  assert.equal(wasm.is_shard_broken(centerShard), 1);
-  assert.equal(wasm.get_shard_growth(centerShard), 0);
-  assert.ok(wasm.get_ball_x(1) < beforeX);
-  assert.equal(growthBreakEvents, 1);
-  assert.equal(collisionEvents, 0);
-});
-
-test("Only the chosen ball can start New Growth", async () => {
-  const wasm = await loadRuntime();
-  wasm.initialize_real_simulation(7, 77, 2);
-  wasm.set_tech_chosen_one_state(1);
-  wasm.set_tech_new_growth_state(1);
-  wasm.set_all_shards_broken(1);
-  wasm.set_ball_state(0, 100, 100, 0, 0, 0);
-  wasm.set_ball_state(1, 0, 0, -1.4366976021418008, 0, 0);
-  wasm.step_real_simulation(1);
-
-  assert.equal(wasm.get_shard_growing(centerShardIndexFor(wasm)), 0);
-  for (let index = 0; index < wasm.get_event_count(); index += 1) {
-    assert.notEqual(wasm.get_event_type(index), 5);
-  }
+  assert.ok(wasm.get_corrosive_wake_count() > 0);
+  wasm.set_ball_state(0, 0, 0, 0, 0, 0);
+  wasm.step_real_simulation(361);
+  assert.equal(wasm.get_corrosive_wake_count(), 0);
 });
 
 test("The Chosen One empowers only the original ball and makes its direct hit break", async () => {

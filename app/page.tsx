@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
   BASE_BALL_RADIUS,
+  CORROSIVE_WAKE_DURATION_SECONDS,
   INITIAL_VIEW_RADIUS,
   STARTING_LUMENS,
   TAU,
@@ -215,10 +216,11 @@ const ConductionIcon = () => (
   </svg>
 );
 
-const NewGrowthIcon = () => (
-  <svg className="new-growth-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-    <path d="M12 21V12M12 12C10.6 9.7 8.8 8.4 6.2 8.1M12 12C13.4 9.7 15.2 8.4 17.8 8.1M6.2 8.1C5.4 6.5 5.7 4.6 7.1 3.2M17.8 8.1C18.6 6.5 18.3 4.6 16.9 3.2" stroke="currentColor" strokeWidth="1.45" strokeLinecap="round" strokeLinejoin="round" />
-    <path d="M6.4 8.2C8.4 8.4 10 9.2 12 11.5C14 9.2 15.6 8.4 17.6 8.2" stroke="currentColor" strokeWidth="1.15" strokeLinecap="round" />
+const CorrosiveWakeIcon = () => (
+  <svg className="corrosive-wake-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+    <path d="M3.5 7.2C6.4 5.2 8.8 5.2 11.7 7.2C14.6 9.2 17 9.2 20.5 7.2" stroke="currentColor" strokeWidth="1.35" strokeLinecap="round" />
+    <path d="M3.5 12C6.4 10 8.8 10 11.7 12C14.6 14 17 14 20.5 12" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+    <path d="M3.5 16.8C6.4 14.8 8.8 14.8 11.7 16.8C14.6 18.8 17 18.8 20.5 16.8" stroke="currentColor" strokeWidth="1.05" strokeLinecap="round" opacity="0.72" />
   </svg>
 );
 
@@ -227,6 +229,7 @@ const createRenderSimulation = (): Simulation => ({
   broken: new Set(),
   fieldSeed: 0,
   arrows: [],
+  corrosiveWake: [],
   nextArrowId: 1,
   nextImpactId: 1,
   unlockedTechs: [],
@@ -582,7 +585,7 @@ export default function Home() {
         let outwardY = edgeX / length;
         const midpointX = (ax + bx) / 2;
         const midpointY = (ay + by) / 2;
-        if (outwardX * (shard.sx - midpointX) + outwardY * (shard.sy - midpointY) > 0) {
+        if (outwardX * -midpointX + outwardY * -midpointY > 0) {
           outwardX = -outwardX;
           outwardY = -outwardY;
         }
@@ -595,6 +598,8 @@ export default function Home() {
       targetContext.restore();
     };
 
+    // Retained legacy New Growth rendering; this dormant path will be
+    // repurposed when a future regeneration tech returns.
     const drawGrowingShard = (targetContext: ChunkContext, shard: Shard) => {
       const growth = Math.max(0, Math.min(1, shard.growth));
       if (growth <= 0) return;
@@ -682,6 +687,25 @@ export default function Home() {
       context.restore();
     };
 
+    const drawCorrosiveWake = () => {
+      if (sim.corrosiveWake.length === 0) return;
+      context.save();
+      context.lineCap = "round";
+      context.lineJoin = "round";
+      context.shadowBlur = 0.16;
+      context.shadowColor = "rgba(174, 224, 160, 0.42)";
+      sim.corrosiveWake.forEach((segment) => {
+        const strength = Math.max(0, Math.min(1, 1 - segment.age / CORROSIVE_WAKE_DURATION_SECONDS));
+        context.strokeStyle = `rgba(174, 224, 160, ${0.08 + strength * 0.36})`;
+        context.lineWidth = 0.045 + strength * 0.07;
+        context.beginPath();
+        context.moveTo(segment.startX, segment.startY);
+        context.lineTo(segment.endX, segment.endY);
+        context.stroke();
+      });
+      context.restore();
+    };
+
     const draw = () => {
       const renderStartedAt = performance.now();
       context.clearRect(0, 0, width, height);
@@ -742,6 +766,7 @@ export default function Home() {
         }
       }
 
+      drawCorrosiveWake();
       sim.arrows.forEach((arrow) => drawArrow(arrow));
       context.restore();
 
@@ -870,6 +895,7 @@ export default function Home() {
       }
       if (techStateChanged) setUnlockedTechs([...nextUnlockedTechs]);
       sim.arrows = state.arrows.map((arrow) => ({ ...arrow }));
+      sim.corrosiveWake = state.corrosiveWake.map((segment) => ({ ...segment }));
       const nextBroken = new Set(state.broken);
       sim.broken.forEach((key) => {
         if (!nextBroken.has(key)) invalidateShardChunk(key);
@@ -1095,7 +1121,7 @@ export default function Home() {
                           aria-label={`${tech.title}${unlocked ? " unlocked" : " technology"}`}
                         >
                           {tech.icon === "chosen-one" && <ChosenOneIcon />}
-                          {tech.icon === "new-growth" && <NewGrowthIcon />}
+                          {tech.icon === "corrosive-wake" && <CorrosiveWakeIcon />}
                           {tech.icon === "resonance" && <ResonanceIcon />}
                           {tech.icon === "conduction" && <ConductionIcon />}
                         </button>
