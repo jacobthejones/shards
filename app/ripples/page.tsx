@@ -124,7 +124,7 @@ export default function Ripples() {
         </div>
         <div style={topNoteStyle}>A quiet chemistry of light</div>
       </header>
-      <div style={bottomNoteStyle}>ELEMENTAL FRONTS / QUIET REACTIONS</div>
+      <div style={bottomNoteStyle}>ELEMENTAL EXPANSION / WATER · PLANT · FIRE</div>
       <a style={backStyle} href="../">BACK TO SHARDS</a>
       <script src="../ripples.js" defer />
     </main>

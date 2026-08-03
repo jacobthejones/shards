@@ -9,6 +9,12 @@
   const RIPPLE_SPEED_PX_PER_SECOND = 18 / 5;
   const FIELD_RADIUS_FRACTION = 0.38;
   const OUTER_RING_HUE = 43;
+  const FRONT_CIRCLE_SEGMENTS = 72;
+  const FIELD_BOUNDARY_SEGMENTS = 144;
+  const DOMINANCE_GROWTH_RATE = 0.018;
+  const DOMINANCE_LOSS_RATE = 0.012;
+  const MAX_ADVANTAGE = 0.22;
+  const MIN_ADVANTAGE = -0.12;
   const ELEMENTS = [
     { name: "water", hue: 196, color: "#9ed9ee", beats: 2 },
     { name: "plant", hue: 104, color: "#b9e39f", beats: 0 },
@@ -31,120 +37,116 @@
       const candidate = {
         x: Math.cos(angle) * radius,
         y: Math.sin(angle) * radius,
+        advantage: 0,
         kind: sources.length % ELEMENTS.length,
       };
       if (sources.every((source) => distanceSquared(source, candidate) > 0.055 * 0.055)) sources.push(candidate);
     }
     return sources;
   };
-  const clipRange = (range, minimum, maximum) => {
-    const nextMinimum = Math.max(range[0], minimum);
-    const nextMaximum = Math.min(range[1], maximum);
-    return nextMinimum <= nextMaximum ? [nextMinimum, nextMaximum] : null;
+  const circlePolygon = (center, radius, segmentCount) => {
+    const polygon = [];
+    for (let segment = 0; segment < segmentCount; segment += 1) {
+      const angle = (segment / segmentCount) * Math.PI * 2;
+      polygon.push({
+        x: center.x + Math.cos(angle) * radius,
+        y: center.y + Math.sin(angle) * radius,
+      });
+    }
+    return polygon;
   };
-  const circleRangeOnLine = (origin, direction, radius) => {
-    const linear = 2 * (origin.x * direction.x + origin.y * direction.y);
-    const constant = origin.x * origin.x + origin.y * origin.y - radius * radius;
-    const discriminant = linear * linear - 4 * constant;
-    if (discriminant < 0) return null;
-    const root = Math.sqrt(discriminant);
-    return [(-linear - root) / 2, (-linear + root) / 2];
-  };
-  const sharedLineFor = (first, second, sources, rippleRadius, fieldRadius) => {
-    const dx = second.x - first.x;
-    const dy = second.y - first.y;
-    const separation = Math.hypot(dx, dy);
-    if (separation < 0.0001 || rippleRadius * 2 < separation) return null;
-    const midpoint = { x: (first.x + second.x) / 2, y: (first.y + second.y) / 2 };
-    const direction = { x: -dy / separation, y: dx / separation };
-    const halfExtent = Math.sqrt(Math.max(0, rippleRadius * rippleRadius - (separation / 2) ** 2));
-    let range = [-halfExtent, halfExtent];
-    const fieldRange = circleRangeOnLine(midpoint, direction, fieldRadius);
-    if (!fieldRange) return null;
-    const clippedToField = clipRange(range, fieldRange[0], fieldRange[1]);
-    if (!clippedToField) return null;
-    range = clippedToField;
-    for (const other of sources) {
-      if (other === first || other === second) continue;
-      const otherX = other.x - first.x;
-      const otherY = other.y - first.y;
-      const coefficient = 2 * (direction.x * otherX + direction.y * otherY);
-      const limit = other.x * other.x + other.y * other.y
-        - first.x * first.x - first.y * first.y
-        - 2 * (midpoint.x * otherX + midpoint.y * otherY);
-      if (Math.abs(coefficient) < 0.000001) {
-        if (limit < 0) return null;
-        continue;
-      }
-      if (coefficient > 0) {
-        const clipped = clipRange(range, Number.NEGATIVE_INFINITY, limit / coefficient);
-        if (!clipped) return null;
-        range = clipped;
-      } else {
-        const clipped = clipRange(range, limit / coefficient, Number.POSITIVE_INFINITY);
-        if (!clipped) return null;
-        range = clipped;
+  const clipPolygon = (polygon, normalX, normalY, limit) => {
+    if (polygon.length === 0) return polygon;
+    const clipped = [];
+    for (let index = 0; index < polygon.length; index += 1) {
+      const current = polygon[index];
+      const next = polygon[(index + 1) % polygon.length];
+      const currentValue = normalX * current.x + normalY * current.y - limit;
+      const nextValue = normalX * next.x + normalY * next.y - limit;
+      const currentInside = currentValue <= 0;
+      const nextInside = nextValue <= 0;
+      if (currentInside && nextInside) {
+        clipped.push(next);
+      } else if (currentInside && !nextInside) {
+        const ratio = currentValue / (currentValue - nextValue);
+        clipped.push({
+          x: current.x + (next.x - current.x) * ratio,
+          y: current.y + (next.y - current.y) * ratio,
+        });
+      } else if (!currentInside && nextInside) {
+        const ratio = currentValue / (currentValue - nextValue);
+        clipped.push({
+          x: current.x + (next.x - current.x) * ratio,
+          y: current.y + (next.y - current.y) * ratio,
+        });
+        clipped.push(next);
       }
     }
-    return {
-      start: { x: midpoint.x + direction.x * range[0], y: midpoint.y + direction.y * range[0] },
-      end: { x: midpoint.x + direction.x * range[1], y: midpoint.y + direction.y * range[1] },
-    };
+    return clipped;
   };
-  const drawWavefronts = (sources, rippleRadius, fieldRadius, pixelScale) => {
-    if (rippleRadius <= 0) return;
-    const sampleCount = 420;
-    const visibilityPadding = 0.003;
-    sources.forEach((source) => {
-      context.beginPath();
-      let drawing = false;
-      for (let sample = 0; sample <= sampleCount; sample += 1) {
-        const angle = (sample / sampleCount) * Math.PI * 2;
-        const point = { x: source.x + Math.cos(angle) * rippleRadius, y: source.y + Math.sin(angle) * rippleRadius };
-        const insideField = distanceSquared(point, { x: 0, y: 0 }) <= (fieldRadius + visibilityPadding) ** 2;
-        const outsideOtherRipples = sources.every((other) => {
-          if (other === source || distanceSquared(point, other) >= (rippleRadius - visibilityPadding) ** 2) return true;
-          return beats(source.kind, other.kind);
-        });
-        if (insideField && outsideOtherRipples) {
-          if (!drawing) context.moveTo(point.x, point.y);
-          else context.lineTo(point.x, point.y);
-          drawing = true;
-        } else drawing = false;
-      }
-      const element = ELEMENTS[source.kind];
-      context.strokeStyle = pastelColor(element.hue, 0.3);
-      context.lineWidth = 0.7 / pixelScale;
-      context.shadowColor = pastelColor(element.hue, 0.58);
-      context.shadowBlur = 8 / pixelScale;
-      context.stroke();
-      context.shadowBlur = 0;
-    });
+  const clipToConvexBoundary = (polygon, boundary) => {
+    let clipped = polygon;
+    for (let index = 0; index < boundary.length && clipped.length > 0; index += 1) {
+      const start = boundary[index];
+      const end = boundary[(index + 1) % boundary.length];
+      const edgeX = end.x - start.x;
+      const edgeY = end.y - start.y;
+      clipped = clipPolygon(clipped, edgeY, -edgeX, edgeY * start.x - edgeX * start.y);
+    }
+    return clipped;
   };
-  const drawSharedLines = (sources, rippleRadius, fieldRadius, pixelScale) => {
+  const effectiveRadiusFor = (source, rippleRadius) => Math.max(0.002, rippleRadius + source.advantage);
+  const updateDominance = (sources, rippleRadius, elapsed) => {
+    const radii = sources.map((source) => effectiveRadiusFor(source, rippleRadius));
     for (let firstIndex = 0; firstIndex < sources.length; firstIndex += 1) {
       for (let secondIndex = firstIndex + 1; secondIndex < sources.length; secondIndex += 1) {
         const first = sources[firstIndex];
         const second = sources[secondIndex];
-        const line = sharedLineFor(first, second, sources, rippleRadius, fieldRadius);
-        if (!line) continue;
-        const lineLength = Math.sqrt(distanceSquared(line.start, line.end));
-        const winningKind = first.kind === second.kind
-          ? first.kind
-          : beats(first.kind, second.kind) ? first.kind : second.kind;
-        const element = ELEMENTS[winningKind];
-        const alpha = Math.min(0.82, 0.2 + lineLength * 1.15);
-        context.beginPath();
-        context.moveTo(line.start.x, line.start.y);
-        context.lineTo(line.end.x, line.end.y);
-        context.strokeStyle = pastelColor(element.hue, alpha);
-        context.lineWidth = 1.15 / pixelScale;
-        context.shadowColor = pastelColor(element.hue, 0.7);
-        context.shadowBlur = 9 / pixelScale;
-        context.stroke();
-        context.shadowBlur = 0;
+        if (first.kind === second.kind) continue;
+        const overlap = radii[firstIndex] + radii[secondIndex] - Math.sqrt(distanceSquared(first, second));
+        if (overlap <= 0) continue;
+        const winner = beats(first.kind, second.kind) ? first : second;
+        const loser = winner === first ? second : first;
+        const contact = Math.min(1, overlap / 0.2);
+        winner.advantage += DOMINANCE_GROWTH_RATE * contact * elapsed;
+        loser.advantage -= DOMINANCE_LOSS_RATE * contact * elapsed;
       }
     }
+    sources.forEach((source) => {
+      source.advantage = Math.max(MIN_ADVANTAGE, Math.min(MAX_ADVANTAGE, source.advantage));
+    });
+  };
+  const drawElementRegions = (sources, rippleRadius, pixelScale) => {
+    const fieldBoundary = circlePolygon({ x: 0, y: 0 }, 1, FIELD_BOUNDARY_SEGMENTS);
+    const radii = sources.map((source) => effectiveRadiusFor(source, rippleRadius));
+    sources.forEach((source, sourceIndex) => {
+      let region = circlePolygon(source, radii[sourceIndex], FRONT_CIRCLE_SEGMENTS);
+      region = clipToConvexBoundary(region, fieldBoundary);
+      for (let otherIndex = 0; otherIndex < sources.length && region.length > 0; otherIndex += 1) {
+        if (otherIndex === sourceIndex) continue;
+        const other = sources[otherIndex];
+        const normalX = 2 * (other.x - source.x);
+        const normalY = 2 * (other.y - source.y);
+        const limit = other.x * other.x + other.y * other.y
+          - source.x * source.x - source.y * source.y
+          + radii[sourceIndex] * radii[sourceIndex]
+          - radii[otherIndex] * radii[otherIndex];
+        region = clipPolygon(region, normalX, normalY, limit);
+      }
+      if (region.length < 3) return;
+      const element = ELEMENTS[source.kind];
+      context.beginPath();
+      context.moveTo(region[0].x, region[0].y);
+      for (let pointIndex = 1; pointIndex < region.length; pointIndex += 1) {
+        context.lineTo(region[pointIndex].x, region[pointIndex].y);
+      }
+      context.closePath();
+      context.fillStyle = element.color;
+      context.shadowColor = pastelColor(element.hue, 0.38);
+      context.shadowBlur = 10 / pixelScale;
+      context.fill();
+      context.shadowBlur = 0;
+    });
   };
   const drawFieldOutline = (fieldRadius, pixelScale) => {
     context.beginPath();
@@ -194,8 +196,7 @@
     context.save();
     context.translate(width / 2, height * 0.53);
     context.scale(fieldRadius, fieldRadius);
-    drawWavefronts(sources, rippleRadius, 1, fieldRadius);
-    drawSharedLines(sources, rippleRadius, 1, fieldRadius);
+    drawElementRegions(sources, rippleRadius, fieldRadius);
     drawFieldOutline(1, fieldRadius);
     drawSources(sources, fieldRadius);
     context.restore();
@@ -217,6 +218,7 @@
       rippleRadius = Math.min(1.08, rippleRadius + (RIPPLE_SPEED_PX_PER_SECOND / Math.max(1, Math.min(width, height) * FIELD_RADIUS_FRACTION)) * elapsed);
       if (rippleRadius >= 1.08) finished = true;
     }
+    updateDominance(sources, rippleRadius, elapsed);
     draw();
     window.requestAnimationFrame(tick);
   };
