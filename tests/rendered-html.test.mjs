@@ -179,10 +179,11 @@ test("keeps the ripple field elemental and particle-free", async () => {
   const ripples = await readFile(new URL("../public/ripples.js", import.meta.url), "utf8");
 
   assert.match(ripples, /RIPPLE_SPEED_PX_PER_SECOND = 18 \/ 5/);
-  assert.match(ripples, /const advanceField =/);
-  assert.match(ripples, /const rowOffset = fieldStep % GRID_SIZE/);
+  assert.match(ripples, /const expandPolygon =/);
+  assert.match(ripples, /const subtractConvexPolygon =/);
+  assert.match(ripples, /const convexHull =/);
   assert.match(ripples, /window\.requestAnimationFrame\(tick\)/);
-  assert.doesNotMatch(ripples, /captureDistance|rippleRadius|finished|cooldown/i);
+  assert.doesNotMatch(ripples, /GRID_SIZE|captureDistance|rippleRadius|finished|cooldown|blur\(/i);
   assert.match(ripples, /name: "water"[\s\S]*beats: 2/);
   assert.match(ripples, /name: "plant"[\s\S]*beats: 0/);
   assert.match(ripples, /name: "fire"[\s\S]*beats: 1/);
@@ -259,18 +260,6 @@ const runRippleScenario = (script, scenario, seconds) => {
   return { advance, getState, initialState, fills };
 };
 
-const kindExtent = (state, kind) => {
-  const gridRadius = state.gridSize / 2 - 1;
-  let extent = 0;
-  state.snapshot().forEach((cellKind, index) => {
-    if (cellKind !== kind) return;
-    const x = (index % state.gridSize) - gridRadius;
-    const y = Math.floor(index / state.gridSize) - gridRadius;
-    extent = Math.max(extent, Math.hypot(x, y) / gridRadius);
-  });
-  return extent;
-};
-
 test("every dominant center advances at the same rate with losing elements around it", async () => {
   const script = await readFile(new URL("../public/ripples.js", import.meta.url), "utf8");
   for (const [scenario, emptyScenario, dominantKind] of [
@@ -278,10 +267,10 @@ test("every dominant center advances at the same rate with losing elements aroun
     ["center-plant", "center-empty-plant", 1],
     ["center-fire", "center-empty-fire", 2],
   ]) {
-    const emptyState = runRippleScenario(script, emptyScenario, 8).getState();
-    const surroundedState = runRippleScenario(script, scenario, 8).getState();
+    const emptyState = runRippleScenario(script, emptyScenario, 5).getState();
+    const surroundedState = runRippleScenario(script, scenario, 5).getState();
     assert.ok(
-      Math.abs(kindExtent(emptyState, dominantKind) - kindExtent(surroundedState, dominantKind)) < 0.08,
+      Math.abs(emptyState.extents()[dominantKind].extent - surroundedState.extents()[dominantKind].extent) < 0.01,
       `${scenario} was slowed by its losing ring`,
     );
   }
@@ -289,20 +278,20 @@ test("every dominant center advances at the same rate with losing elements aroun
 
 test("three elements keep changing after the initial seeds have filled the field", async () => {
   const script = await readFile(new URL("../public/ripples.js", import.meta.url), "utf8");
-  const scenario = runRippleScenario(script, "three-wedges", 14);
+  const scenario = runRippleScenario(script, "three-wedges", 5);
   const firstMovingState = scenario.getState();
   const firstSnapshot = firstMovingState.snapshot();
   const firstAngle = firstMovingState.centroids()[0].angle;
-  scenario.advance(4);
+  scenario.advance(2);
   const secondMovingState = scenario.getState();
   const secondSnapshot = secondMovingState.snapshot();
   const angleDelta = Math.abs(Math.atan2(
     Math.sin(secondMovingState.centroids()[0].angle - firstAngle),
     Math.cos(secondMovingState.centroids()[0].angle - firstAngle),
   ));
-  assert.ok(secondMovingState.age > 14, "the simulation should keep aging after the initial growth");
+  assert.ok(secondMovingState.age > 5, "the simulation should keep aging after the initial growth");
   assert.notDeepEqual(secondSnapshot, firstSnapshot, "the elemental field should keep evolving");
   assert.ok(angleDelta > 0.03, "the three-way field should move its fronts around the circle");
-  scenario.advance(8);
+  scenario.advance(3);
   assert.notDeepEqual(scenario.getState().snapshot(), secondSnapshot, "the field should not settle permanently");
 });

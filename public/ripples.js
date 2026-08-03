@@ -9,28 +9,140 @@
   const RIPPLE_SPEED_PX_PER_SECOND = 18 / 5;
   const FIELD_RADIUS_FRACTION = 0.38;
   const OUTER_RING_HUE = 43;
-  const EMPTY_KIND = -1;
-  const PRODUCTION_GRID_SIZE = 192;
-  const TEST_GRID_SIZE = 96;
-  const GRID_SIZE = canvas.dataset?.ripplesTest ? TEST_GRID_SIZE : PRODUCTION_GRID_SIZE;
-  const GRID_RADIUS = GRID_SIZE / 2 - 1;
-  const SEED_RADIUS = 0.018;
+  const GEOMETRY_EPSILON = 0.000001;
+  const OFFSET_ARC_SEGMENTS = 20;
+  const FIELD_BOUNDARY_SEGMENTS = 64;
+  const MAX_REGION_PIECES = 32;
+  const SOURCE_RADIUS = 0.014;
   const ELEMENTS = [
-    { name: "water", hue: 196, color: "#9ed9ee", beats: 2, rgb: [158, 217, 238] },
-    { name: "plant", hue: 104, color: "#b9e39f", beats: 0, rgb: [185, 227, 159] },
-    { name: "fire", hue: 20, color: "#f1b18c", beats: 1, rgb: [241, 177, 140] },
+    { name: "water", hue: 196, color: "#9ed9ee", beats: 2 },
+    { name: "plant", hue: 104, color: "#b9e39f", beats: 0 },
+    { name: "fire", hue: 20, color: "#f1b18c", beats: 1 },
   ];
-  const NEIGHBOR_DIRECTIONS = [
-    [-1, -1, Math.SQRT2], [0, -1, 1], [1, -1, Math.SQRT2],
-    [-1, 0, 1], [1, 0, 1],
-    [-1, 1, Math.SQRT2], [0, 1, 1], [1, 1, Math.SQRT2],
-  ];
-  const distanceSquared = (first, second) => {
-    const dx = first.x - second.x;
-    const dy = first.y - second.y;
-    return dx * dx + dy * dy;
+
+  const cross = (first, second, third) => (
+    (second[0] - first[0]) * (third[1] - first[1])
+    - (second[1] - first[1]) * (third[0] - first[0])
+  );
+  const polygonArea = (polygon) => {
+    let doubledArea = 0;
+    for (let index = 0; index < polygon.length; index += 1) {
+      const current = polygon[index];
+      const next = polygon[(index + 1) % polygon.length];
+      doubledArea += current[0] * next[1] - next[0] * current[1];
+    }
+    return doubledArea / 2;
   };
-  const beats = (firstKind, secondKind) => ELEMENTS[firstKind].beats === secondKind;
+  const polygonIsUsable = (polygon) => polygon.length >= 3 && Math.abs(polygonArea(polygon)) > GEOMETRY_EPSILON;
+  const polygonBounds = (polygon) => polygon.reduce((bounds, [x, y]) => ({
+    minX: Math.min(bounds.minX, x),
+    minY: Math.min(bounds.minY, y),
+    maxX: Math.max(bounds.maxX, x),
+    maxY: Math.max(bounds.maxY, y),
+  }), { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity });
+  const boundsOverlap = (first, second) => (
+    first.minX <= second.maxX + GEOMETRY_EPSILON
+    && first.maxX + GEOMETRY_EPSILON >= second.minX
+    && first.minY <= second.maxY + GEOMETRY_EPSILON
+    && first.maxY + GEOMETRY_EPSILON >= second.minY
+  );
+  const convexHull = (points) => {
+    const sorted = points
+      .map(([x, y]) => [x, y])
+      .sort((first, second) => first[0] - second[0] || first[1] - second[1]);
+    const unique = [];
+    sorted.forEach((point) => {
+      const previous = unique[unique.length - 1];
+      if (!previous || Math.hypot(point[0] - previous[0], point[1] - previous[1]) > GEOMETRY_EPSILON) unique.push(point);
+    });
+    if (unique.length < 3) return unique;
+    const lower = [];
+    unique.forEach((point) => {
+      while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], point) <= GEOMETRY_EPSILON) lower.pop();
+      lower.push(point);
+    });
+    const upper = [];
+    for (let index = unique.length - 1; index >= 0; index -= 1) {
+      const point = unique[index];
+      while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], point) <= GEOMETRY_EPSILON) upper.pop();
+      upper.push(point);
+    }
+    lower.pop();
+    upper.pop();
+    return lower.concat(upper);
+  };
+  const circlePolygon = (x, y, radius, segments = OFFSET_ARC_SEGMENTS) => {
+    const polygon = [];
+    for (let segment = 0; segment < segments; segment += 1) {
+      const angle = (segment / segments) * Math.PI * 2;
+      polygon.push([x + Math.cos(angle) * radius, y + Math.sin(angle) * radius]);
+    }
+    return polygon;
+  };
+  const clipToHalfPlane = (polygon, first, second, keepLeft) => {
+    if (polygon.length < 3) return [];
+    const clipped = [];
+    const inside = (point) => {
+      const value = cross(first, second, point);
+      return keepLeft ? value >= -GEOMETRY_EPSILON : value <= GEOMETRY_EPSILON;
+    };
+    const intersection = (current, next) => {
+      const currentValue = cross(first, second, current);
+      const nextValue = cross(first, second, next);
+      const ratio = currentValue / (currentValue - nextValue);
+      return [
+        current[0] + (next[0] - current[0]) * ratio,
+        current[1] + (next[1] - current[1]) * ratio,
+      ];
+    };
+    for (let index = 0; index < polygon.length; index += 1) {
+      const current = polygon[index];
+      const next = polygon[(index + 1) % polygon.length];
+      const currentInside = inside(current);
+      const nextInside = inside(next);
+      if (currentInside) clipped.push(current);
+      if (currentInside !== nextInside) clipped.push(intersection(current, next));
+    }
+    return polygonIsUsable(clipped) ? clipped : [];
+  };
+  const clipConvexPolygon = (subject, clipper) => {
+    let clipped = subject;
+    for (let index = 0; index < clipper.length; index += 1) {
+      clipped = clipToHalfPlane(clipped, clipper[index], clipper[(index + 1) % clipper.length], true);
+      if (!clipped.length) break;
+    }
+    return clipped;
+  };
+  const subtractConvexPolygon = (subject, cutter) => {
+    if (!boundsOverlap(polygonBounds(subject), polygonBounds(cutter))) return [subject];
+    let remaining = subject;
+    const pieces = [];
+    for (let index = 0; index < cutter.length; index += 1) {
+      const first = cutter[index];
+      const second = cutter[(index + 1) % cutter.length];
+      const outside = clipToHalfPlane(remaining, first, second, false);
+      if (outside.length) pieces.push(outside);
+      remaining = clipToHalfPlane(remaining, first, second, true);
+      if (!remaining.length) break;
+    }
+    return pieces;
+  };
+  const limitRegionPieces = (polygons) => {
+    if (polygons.length <= MAX_REGION_PIECES) return polygons;
+    return [convexHull(polygons.flat())];
+  };
+  const expandPolygon = (polygon, distance) => {
+    if (!polygon.length || distance <= GEOMETRY_EPSILON) return polygon;
+    const expandedPoints = polygon.slice();
+    polygon.forEach(([x, y]) => {
+      for (let segment = 0; segment < OFFSET_ARC_SEGMENTS; segment += 1) {
+        const angle = (segment / OFFSET_ARC_SEGMENTS) * Math.PI * 2;
+        expandedPoints.push([x + Math.cos(angle) * distance, y + Math.sin(angle) * distance]);
+      }
+    });
+    return convexHull(expandedPoints);
+  };
+  const pastelColor = (hue, alpha) => `hsla(${hue}, 64%, 80%, ${alpha})`;
   const createSources = () => {
     const emptyKindForTest = {
       "center-empty": 0,
@@ -72,150 +184,58 @@
         y: Math.sin(angle) * radius,
         kind: sources.length % ELEMENTS.length,
       };
-      if (sources.every((source) => distanceSquared(source, candidate) > 0.055 * 0.055)) sources.push(candidate);
+      if (sources.every((source) => Math.hypot(source.x - candidate.x, source.y - candidate.y) > 0.055)) sources.push(candidate);
     }
     return sources;
   };
   const sources = createSources();
-  const gridCellIndex = (x, y) => y * GRID_SIZE + x;
-  const isInsideField = (x, y) => {
-    const normalizedX = (x - GRID_RADIUS) / GRID_RADIUS;
-    const normalizedY = (y - GRID_RADIUS) / GRID_RADIUS;
-    return normalizedX * normalizedX + normalizedY * normalizedY <= 1;
+  const fieldBoundary = circlePolygon(0, 0, 1, FIELD_BOUNDARY_SEGMENTS);
+  const regions = ELEMENTS.map(() => []);
+  sources.forEach((source) => {
+    regions[source.kind].push(circlePolygon(source.x, source.y, SOURCE_RADIUS));
+  });
+  const copyRegions = (sourceRegions) => sourceRegions.map((elementRegions) => elementRegions.map((polygon) => polygon.map(([x, y]) => [x, y])));
+  const expandRegions = (sourceRegions, distance) => sourceRegions.map((elementRegions) => elementRegions
+    .map((polygon) => clipConvexPolygon(expandPolygon(polygon, distance), fieldBoundary))
+    .filter((polygon) => polygon.length));
+  const resolveDominance = (expandedRegions) => {
+    const resolvedRegions = copyRegions(expandedRegions);
+    for (let loserKind = 0; loserKind < ELEMENTS.length; loserKind += 1) {
+      const winnerKind = ELEMENTS.findIndex((element) => element.beats === loserKind);
+      if (winnerKind < 0) continue;
+      expandedRegions[winnerKind].forEach((cutter) => {
+        resolvedRegions[loserKind] = limitRegionPieces(
+          resolvedRegions[loserKind].flatMap((polygon) => subtractConvexPolygon(polygon, cutter)),
+        );
+      });
+    }
+    return resolvedRegions;
   };
-  const createGridState = () => {
-    const cellCount = GRID_SIZE * GRID_SIZE;
-    const kinds = new Int8Array(cellCount);
-    const pendingKinds = new Int8Array(cellCount);
-    const captureProgress = new Float32Array(cellCount);
-    kinds.fill(EMPTY_KIND);
-    pendingKinds.fill(EMPTY_KIND);
-    for (let y = 0; y < GRID_SIZE; y += 1) {
-      for (let x = 0; x < GRID_SIZE; x += 1) {
-        if (!isInsideField(x, y)) continue;
-        const normalizedPosition = {
-          x: (x - GRID_RADIUS) / GRID_RADIUS,
-          y: (y - GRID_RADIUS) / GRID_RADIUS,
-        };
-        for (const source of sources) {
-          if (distanceSquared(source, normalizedPosition) <= SEED_RADIUS * SEED_RADIUS) {
-            kinds[gridCellIndex(x, y)] = source.kind;
-            break;
-          }
-        }
-      }
-    }
-    return {
-      kinds,
-      pendingKinds,
-      captureProgress,
-      pendingStepLengths: new Float32Array(cellCount),
-      inside: Array.from({ length: cellCount }, (_, index) => isInsideField(index % GRID_SIZE, Math.floor(index / GRID_SIZE))),
-    };
+  const advanceRegions = (distance) => {
+    if (distance <= GEOMETRY_EPSILON) return;
+    const expandedRegions = expandRegions(regions, distance);
+    const resolvedRegions = resolveDominance(expandedRegions);
+    for (let kind = 0; kind < ELEMENTS.length; kind += 1) regions[kind] = resolvedRegions[kind];
   };
-  const field = createGridState();
-  const chooseInvader = (x, y, currentKind, pendingKind) => {
-    const support = [0, 0, 0];
-    const nearestDistance = [Infinity, Infinity, Infinity];
-    for (const [offsetX, offsetY, stepLength] of NEIGHBOR_DIRECTIONS) {
-      const neighborX = x + offsetX;
-      const neighborY = y + offsetY;
-      if (neighborX < 0 || neighborX >= GRID_SIZE || neighborY < 0 || neighborY >= GRID_SIZE) continue;
-      const neighborKind = field.kinds[gridCellIndex(neighborX, neighborY)];
-      if (neighborKind < 0) continue;
-      if (currentKind < 0 || beats(neighborKind, currentKind)) {
-        support[neighborKind] += 1 / stepLength;
-        nearestDistance[neighborKind] = Math.min(nearestDistance[neighborKind], stepLength);
-      }
-    }
-    const strongestSupport = Math.max(...support);
-    if (strongestSupport === 0) return { kind: EMPTY_KIND, stepLength: 0 };
-    if (pendingKind >= 0 && support[pendingKind] >= strongestSupport - 0.001) {
-      return { kind: pendingKind, stepLength: nearestDistance[pendingKind] };
-    }
-    const tieStart = (x * 17 + y * 31) % ELEMENTS.length;
-    for (let offset = 0; offset < ELEMENTS.length; offset += 1) {
-      const candidateKind = (tieStart + offset) % ELEMENTS.length;
-      if (support[candidateKind] >= strongestSupport - 0.001) {
-        return { kind: candidateKind, stepLength: nearestDistance[candidateKind] };
-      }
-    }
-    return { kind: EMPTY_KIND, stepLength: 0 };
+  const drawPolygon = (polygon) => {
+    context.beginPath();
+    context.moveTo(polygon[0][0], polygon[0][1]);
+    for (let index = 1; index < polygon.length; index += 1) context.lineTo(polygon[index][0], polygon[index][1]);
+    context.closePath();
+    context.fill();
   };
-  let fieldStep = 0;
-  const advanceField = (distance) => {
-    const rowOffset = fieldStep % GRID_SIZE;
-    const columnOffset = (fieldStep * 17) % GRID_SIZE;
-    for (let row = 1; row < GRID_SIZE - 1; row += 1) {
-      const y = ((row + rowOffset) % (GRID_SIZE - 2)) + 1;
-      for (let column = 1; column < GRID_SIZE - 1; column += 1) {
-        const x = ((column + columnOffset) % (GRID_SIZE - 2)) + 1;
-        const index = gridCellIndex(x, y);
-        if (!field.inside[index]) continue;
-        const invader = chooseInvader(x, y, field.kinds[index], field.pendingKinds[index]);
-        if (invader.kind < 0) {
-          field.pendingKinds[index] = EMPTY_KIND;
-          field.captureProgress[index] = 0;
-          field.pendingStepLengths[index] = 0;
-          continue;
-        }
-        if (field.pendingKinds[index] !== invader.kind || field.pendingStepLengths[index] !== invader.stepLength) {
-          field.captureProgress[index] = 0;
-        }
-        field.pendingKinds[index] = invader.kind;
-        field.pendingStepLengths[index] = invader.stepLength;
-        field.captureProgress[index] += distance / invader.stepLength;
-        if (field.captureProgress[index] >= 1) {
-          field.kinds[index] = invader.kind;
-          field.pendingKinds[index] = EMPTY_KIND;
-          field.pendingStepLengths[index] = 0;
-          field.captureProgress[index] = 0;
-        }
-      }
-    }
-    fieldStep += 1;
-  };
-  const fieldCanvas = typeof document.createElement === "function" ? document.createElement("canvas") : null;
-  const fieldContext = fieldCanvas?.getContext("2d") ?? null;
-  let fieldImageData = null;
-  if (fieldCanvas && fieldContext?.createImageData) {
-    fieldCanvas.width = GRID_SIZE;
-    fieldCanvas.height = GRID_SIZE;
-    fieldImageData = fieldContext.createImageData(GRID_SIZE, GRID_SIZE);
-  }
-  const blendChannel = (first, second, amount) => Math.round(first + (second - first) * amount);
-  const drawFieldImage = () => {
-    if (!fieldContext || !fieldImageData) return;
-    for (let index = 0; index < field.kinds.length; index += 1) {
-      const pixelIndex = index * 4;
-      const currentKind = field.kinds[index];
-      const pendingKind = field.pendingKinds[index];
-      const amount = Math.min(1, field.captureProgress[index]);
-      if (currentKind < 0 && pendingKind < 0) {
-        fieldImageData.data[pixelIndex + 3] = 0;
-        continue;
-      }
-      const firstColor = currentKind < 0 ? [0, 0, 0] : ELEMENTS[currentKind].rgb;
-      const secondColor = pendingKind < 0 ? firstColor : ELEMENTS[pendingKind].rgb;
-      const alpha = currentKind < 0 ? Math.round(amount * 255) : 255;
-      fieldImageData.data[pixelIndex] = blendChannel(firstColor[0], secondColor[0], amount);
-      fieldImageData.data[pixelIndex + 1] = blendChannel(firstColor[1], secondColor[1], amount);
-      fieldImageData.data[pixelIndex + 2] = blendChannel(firstColor[2], secondColor[2], amount);
-      fieldImageData.data[pixelIndex + 3] = alpha;
-    }
-    fieldContext.putImageData(fieldImageData, 0, 0);
-  };
-  const drawElementRegions = () => {
-    drawFieldImage();
-    if (!fieldCanvas || typeof context.drawImage !== "function") return;
+  const drawElementRegions = (pixelScale) => {
     context.save();
     context.beginPath();
     context.arc(0, 0, 1, 0, Math.PI * 2);
     context.clip();
-    context.imageSmoothingEnabled = true;
-    context.filter = "blur(8px)";
-    context.drawImage(fieldCanvas, -1, -1, 2, 2);
-    context.filter = "none";
+    ELEMENTS.forEach((element, kind) => {
+      context.fillStyle = element.color;
+      context.shadowColor = pastelColor(element.hue, 0.38);
+      context.shadowBlur = 9 / pixelScale;
+      regions[kind].forEach(drawPolygon);
+    });
+    context.shadowBlur = 0;
     context.restore();
   };
   const drawFieldOutline = (fieldRadius, pixelScale) => {
@@ -245,38 +265,39 @@
       context.shadowColor = element.color;
       context.shadowBlur = 9 / pixelScale;
       context.fill();
-      context.globalAlpha = 1;
       context.beginPath();
       context.arc(source.x, source.y, 0.006, 0, Math.PI * 2);
       context.fillStyle = "rgba(255, 255, 247, 0.92)";
-      context.globalAlpha = opacity;
-      context.shadowBlur = 0;
       context.fill();
       context.globalAlpha = 1;
+      context.shadowBlur = 0;
     });
   };
-
   const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   const testSpeedMultiplier = canvas.dataset?.ripplesTest ? 8 : 1;
   let width = 1;
   let height = 1;
-  let devicePixelRatio = 1;
   let simulationAge = 0;
   let lastTime = performance.now();
   const getTestState = () => ({
     age: simulationAge,
-    gridSize: GRID_SIZE,
-    snapshot: () => Array.from(field.kinds),
+    snapshot: () => regions.map((elementRegions) => elementRegions.map((polygon) => polygon.map(([x, y]) => [x, y]))),
+    extents: () => ELEMENTS.map((element, kind) => {
+      let extent = 0;
+      regions[kind].forEach((polygon) => polygon.forEach(([x, y]) => {
+        extent = Math.max(extent, Math.hypot(x, y));
+      }));
+      return { name: element.name, extent };
+    }),
     centroids: () => ELEMENTS.map((element, kind) => {
       let x = 0;
       let y = 0;
       let count = 0;
-      for (let index = 0; index < field.kinds.length; index += 1) {
-        if (field.kinds[index] !== kind) continue;
-        x += (index % GRID_SIZE) - GRID_RADIUS;
-        y += Math.floor(index / GRID_SIZE) - GRID_RADIUS;
+      regions[kind].forEach((polygon) => polygon.forEach((point) => {
+        x += point[0];
+        y += point[1];
         count += 1;
-      }
+      }));
       return { name: element.name, angle: Math.atan2(y, x), count };
     }),
   });
@@ -288,7 +309,7 @@
     context.save();
     context.translate(width / 2, height * 0.53);
     context.scale(fieldRadius, fieldRadius);
-    drawElementRegions();
+    drawElementRegions(fieldRadius);
     drawSources(fieldRadius, Math.max(0, 1 - simulationAge / 8));
     drawFieldOutline(1, fieldRadius);
     context.restore();
@@ -297,7 +318,7 @@
     const bounds = canvas.getBoundingClientRect();
     width = Math.max(1, bounds.width);
     height = Math.max(1, bounds.height);
-    devicePixelRatio = Math.min(window.devicePixelRatio || 1, 2);
+    const devicePixelRatio = Math.min(window.devicePixelRatio || 1, 2);
     canvas.width = Math.floor(width * devicePixelRatio);
     canvas.height = Math.floor(height * devicePixelRatio);
     context.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
@@ -308,8 +329,8 @@
     lastTime = now;
     simulationAge += elapsed;
     const fieldRadius = Math.min(width, height) * FIELD_RADIUS_FRACTION;
-    const cellsPerSecond = (RIPPLE_SPEED_PX_PER_SECOND * GRID_RADIUS * testSpeedMultiplier) / Math.max(1, fieldRadius);
-    advanceField(cellsPerSecond * elapsed);
+    const expansion = (RIPPLE_SPEED_PX_PER_SECOND * elapsed * testSpeedMultiplier) / Math.max(1, fieldRadius);
+    advanceRegions(expansion);
     draw();
     window.requestAnimationFrame(tick);
   };
