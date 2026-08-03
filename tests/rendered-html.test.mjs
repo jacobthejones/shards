@@ -157,23 +157,3 @@ test("keeps the prototype self-contained", async () => {
   assert.match(renderCache, /class RenderChunkCache/);
   assert.match(renderCache, /renderChunkSignature/);
 });
-
-test("keeps the growth prototype isolated from the live shard route", async () => {
-  const [page, engine, techTree, copiedSimulation] = await Promise.all([
-    readFile(new URL("../app/growth/page.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../app/growth/growth-engine.ts", import.meta.url), "utf8"),
-    readFile(new URL("../app/growth/growth-tech-tree.ts", import.meta.url), "utf8"),
-    readFile(new URL("../app/growth/simulation.ts", import.meta.url), "utf8"),
-  ]);
-
-  assert.match(page, /createGrowthState/);
-  assert.match(page, /growth tech tree/);
-  assert.match(page, /Fifteen calm balls regrowing green shards/);
-  assert.match(engine, /finaleRemaining: 1/);
-  assert.match(engine, /GROWTH_DECAY_RATE = 0\.01/);
-  assert.match(engine, /GROWTH_HEALTH_PER_EXIT = 0\.5/);
-  assert.match(engine, /shard\.tangible/);
-  assert.match(engine, /bounceOffTangibleShards/);
-  assert.match(techTree, /A shard that reaches fullness/);
-  assert.match(copiedSimulation, /buildVoronoiCell/);
-});

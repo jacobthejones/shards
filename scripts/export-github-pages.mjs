@@ -15,8 +15,7 @@ const exportRoute = async (requestPath, outputPath) => {
   await writeFile(outputPath, await response.text());
 };
 
-// Vinext's static exporter currently skips these routes when basePath is set,
-// even though the production handler can render them correctly. Materialize
-// the two HTML entry points from that same handler before Pages deployment.
+// Vinext's static exporter currently skips the root route when basePath is set,
+// even though the production handler can render it correctly. Materialize the
+// HTML entry point from that same handler before Pages deployment.
 await exportRoute("/shards/", path.join(outputRoot, "index.html"));
-await exportRoute("/shards/ripples/", path.join(outputRoot, "ripples", "index.html"));

@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { rewriteProjectSiteAssetReferences } from "../scripts/github-pages-assets.mjs";
 
@@ -38,13 +37,4 @@ test("Pages preparation leaves RSC resource URLs without asset query mutations",
   const rewritten = rewriteProjectSiteAssetReferences(source, "abc123def456");
 
   assert.equal(rewritten, source);
-});
-
-test("Pages asset preparation preserves the rendered growth route", async () => {
-  const html = await readFile(new URL("../dist/client/ripples/index.html", import.meta.url), "utf8");
-
-  assert.match(html, /<title>growth — after the field<\/title>/);
-  assert.match(html, /Fifteen calm balls regrowing green shards/);
-  assert.match(html, /LAST SHARD IN 1\.0s/);
-  assert.doesNotMatch(html, /data-ripples-canvas|WATER · PLANT · FIRE/);
 });
