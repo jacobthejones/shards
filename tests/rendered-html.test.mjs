@@ -58,7 +58,7 @@ test("keeps the prototype self-contained", async () => {
   assert.match(page, /playHarmonicTone/);
   assert.match(page, /voice === "resonance"/);
   assert.match(page, /voice: "resonance" \| "conduction"/);
-  assert.match(page, /impactVoronoiCellsFor/);
+  assert.doesNotMatch(page, /impactVoronoiCellsFor|fractureCellCache|fracturesVisible/);
   assert.match(page, /OffscreenCanvas/);
   assert.match(page, /RenderChunkCache/);
   assert.match(page, /drawImage/);
@@ -104,7 +104,7 @@ test("keeps the prototype self-contained", async () => {
   assert.match(page, /if \(techStateChanged\) saveCurrentGame\(\);/);
   assert.doesNotMatch(page, /prism tip|dampener|ball size|BALL_SIZE_COST|buyBallSize/i);
   assert.match(simulation, /buildVoronoiCell/);
-  assert.match(simulation, /impactVoronoiCellsFor/);
+  assert.doesNotMatch(simulation, /impactVoronoiCellsFor/);
   assert.doesNotMatch(simulation, /createSimulation|stepSimulation|collisionFor|buyBall|refreshShardHealth/);
   assert.match(simulation, /emptyRegionBounds/);
   assert.match(simulation, /emptyRegionEnclosingCircle/);

@@ -20,7 +20,6 @@ const shard = (overrides: Partial<{
   growth: number;
   growing: boolean;
   hue: number;
-  impacts: { id: number; x: number; y: number; inwardX: number; inwardY: number; strength: number }[];
 }> = {}) => ({
   key: "0:0",
   broken: false,
@@ -29,7 +28,6 @@ const shard = (overrides: Partial<{
   growth: 0,
   growing: false,
   hue: 180,
-  impacts: [],
   ...overrides,
 });
 
@@ -53,14 +51,18 @@ test("visible cell bounds map to every chunk they touch", () => {
 
 test("render signatures change for visual state but ignore non-visual timestamps", () => {
   const base = shard();
-  const signature = renderChunkSignature(7, true, [base]);
-  assert.equal(renderChunkSignature(7, true, [{ ...base }]), signature);
-  assert.notEqual(renderChunkSignature(8, true, [base]), signature, "a new field must rebuild the chunk");
-  assert.notEqual(renderChunkSignature(7, false, [base]), signature, "fracture visibility changes the cached pixels");
-  assert.notEqual(renderChunkSignature(7, true, [shard({ health: 0.8 })]), signature, "healing/damage changes fill color");
-  assert.notEqual(renderChunkSignature(7, true, [shard({ growth: 0.4, growing: true })]), signature, "growth changes the outline");
-  assert.notEqual(renderChunkSignature(7, true, [shard({ broken: true })]), signature, "breaking removes the shard from the chunk");
-  assert.notEqual(renderChunkSignature(7, true, [shard({ impacts: [{ id: 1, x: 0, y: 0, inwardX: 1, inwardY: 0, strength: 0.2 }] })]), signature, "new fractures change the chunk");
+  const signature = renderChunkSignature(7, [base]);
+  assert.equal(renderChunkSignature(7, [{ ...base }]), signature);
+  assert.notEqual(renderChunkSignature(8, [base]), signature, "a new field must rebuild the chunk");
+  assert.notEqual(renderChunkSignature(7, [shard({ health: 0.8 })]), signature, "healing/damage changes fill color");
+  assert.notEqual(renderChunkSignature(7, [shard({ growth: 0.4, growing: true })]), signature, "growth changes the outline");
+  assert.notEqual(renderChunkSignature(7, [shard({ broken: true })]), signature, "breaking removes the shard from the chunk");
+  const impactedBase = { ...base, impacts: [{ id: 1 }] } as Parameters<typeof renderChunkSignature>[1][number];
+  assert.equal(
+    renderChunkSignature(7, [impactedBase]),
+    signature,
+    "simulation impacts do not change chunk pixels",
+  );
 });
 
 test("unchanged chunks reuse their raster surface", () => {
@@ -89,12 +91,12 @@ test("a changed shard rerasterizes only the chunk whose signature changed", () =
     () => updates.push(key),
   );
 
-  const unchanged = render("0:0", renderChunkSignature(1, true, [shard({ key: "0:0" })]));
-  const other = render("1:0", renderChunkSignature(1, true, [shard({ key: "8:0" })]));
+  const unchanged = render("0:0", renderChunkSignature(1, [shard({ key: "0:0" })]));
+  const other = render("1:0", renderChunkSignature(1, [shard({ key: "8:0" })]));
   updates.length = 0;
 
-  const changed = render("0:0", renderChunkSignature(1, true, [shard({ key: "0:0", health: 0.7 })]));
-  const stillOther = render("1:0", renderChunkSignature(1, true, [shard({ key: "8:0" })]));
+  const changed = render("0:0", renderChunkSignature(1, [shard({ key: "0:0", health: 0.7 })]));
+  const stillOther = render("1:0", renderChunkSignature(1, [shard({ key: "8:0" })]));
 
   assert.equal(changed, unchanged);
   assert.equal(stillOther, other);

@@ -20,7 +20,6 @@ import {
   emptyRegionBounds,
   emptyRegionEnclosingCircle,
   getHud,
-  impactVoronoiCellsFor,
   keyFor,
   shardBreakFrequency,
   shardCollisionFrequency,
@@ -429,7 +428,6 @@ export default function Home() {
     let latestWorkerMetrics: WorkerMetrics | null = null;
     const metricsEnabled = new URLSearchParams(window.location.search).has("metrics");
     const shardPathCache = new Map<string, Path2D>();
-    const fractureCellCache = new Map<string, [number, number][][]>();
     type ChunkCanvas = HTMLCanvasElement | OffscreenCanvas;
     type ChunkContext = CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
     type RenderChunkSurface = {
@@ -547,56 +545,21 @@ export default function Home() {
       return path;
     };
 
-    const fractureCellsFor = (shard: Shard, impact: Shard["impacts"][number]) => {
-      const cacheKey = `${shard.fieldSeed}:${shard.key}:${impact.id}:${impact.x}:${impact.y}:${impact.inwardX}:${impact.inwardY}`;
-      const cached = fractureCellCache.get(cacheKey);
-      if (cached) return cached;
-      const cells = impactVoronoiCellsFor(shard, impact);
-      fractureCellCache.set(cacheKey, cells);
-      if (fractureCellCache.size > 4096) {
-        const oldestKey = fractureCellCache.keys().next().value;
-        if (oldestKey !== undefined) fractureCellCache.delete(oldestKey);
-      }
-      return cells;
-    };
-
     const invalidateShardChunk = (shardKey: string) => {
       const shard = sim.shards.get(shardKey);
       if (!shard) return;
       chunkCache.invalidate(renderChunkKey(renderChunkCoordinateForCell(shard.gx, shard.gy)));
     };
 
-    const drawShard = (targetContext: ChunkContext, shard: Shard, scale: number) => {
+    const drawShard = (targetContext: ChunkContext, shard: Shard) => {
       const path = shardPathFor(shard);
       const health = shard.health / shard.maxHealth;
-      const damage = 1 - health;
       const lightness = 25 + (1 - health) * 27;
       const saturation = 22 + (1 - health) * 24;
       const alpha = 0.72 + (1 - health) * 0.22;
 
       targetContext.fillStyle = `hsla(${shard.hue}, ${saturation}%, ${lightness}%, ${alpha})`;
       targetContext.fill(path);
-
-      if (shard.impacts.length > 0 && scale > 8) {
-        targetContext.save();
-        targetContext.clip(path);
-        targetContext.strokeStyle = `hsla(${shard.hue + 34}, 42%, 76%, ${0.045 + damage * 0.11})`;
-        targetContext.lineWidth = 0.008;
-        shard.impacts.forEach((impact) => {
-          const fractureCells = fractureCellsFor(shard, impact);
-          const intensity = Math.max(0, Math.min(1, impact.strength / 0.19));
-          targetContext.globalAlpha = 0.28 + intensity * 0.72;
-          fractureCells.forEach((cell) => {
-            if (cell.length < 3) return;
-            targetContext.beginPath();
-            targetContext.moveTo(cell[0][0], cell[0][1]);
-            cell.slice(1).forEach(([pointX, pointY]) => targetContext.lineTo(pointX, pointY));
-            targetContext.closePath();
-            targetContext.stroke();
-          });
-        });
-        targetContext.restore();
-      }
 
       targetContext.strokeStyle = `hsla(${shard.hue + 18}, 50%, 74%, ${0.08 + (1 - health) * 0.2})`;
       targetContext.lineWidth = 0.012;
@@ -651,7 +614,7 @@ export default function Home() {
       return { canvas: chunkCanvas, context: chunkContext };
     };
 
-    const drawChunk = (chunkX: number, chunkY: number, scale: number) => {
+    const drawChunk = (chunkX: number, chunkY: number) => {
       const coordinate = { x: chunkX, y: chunkY };
       const key = renderChunkKey(coordinate);
       const origin = renderChunkOriginForCoordinate(coordinate);
@@ -663,8 +626,7 @@ export default function Home() {
         }
       }
       if (shards.length === 0) return null;
-      const fracturesVisible = scale > 8;
-      const signature = `${sim.fieldSeed}:${fracturesVisible ? 1 : 0}`;
+      const signature = `${sim.fieldSeed}`;
       const surface = chunkCache.getOrCreate(
         key,
         signature,
@@ -691,7 +653,7 @@ export default function Home() {
             if (sim.broken.has(shard.key)) {
               if (shard.growing) drawGrowingShard(chunk.context, shard);
             } else {
-              drawShard(chunk.context, shard, scale);
+              drawShard(chunk.context, shard);
             }
             drawBoundaryEdges(chunk.context, shard);
           });
@@ -802,7 +764,7 @@ export default function Home() {
       chunkCache.setMaxEntries(visibleChunkCount);
       for (let chunkY = visibleChunks.minY; chunkY <= visibleChunks.maxY; chunkY += 1) {
         for (let chunkX = visibleChunks.minX; chunkX <= visibleChunks.maxX; chunkX += 1) {
-          const chunk = drawChunk(chunkX, chunkY, scale);
+          const chunk = drawChunk(chunkX, chunkY);
           if (!chunk) continue;
           context.drawImage(
             chunk.surface.canvas,
@@ -937,7 +899,6 @@ export default function Home() {
       if (fieldChanged || (state.time === 0 && state.awaitingStart)) {
         cachedBounds = null;
         shardPathCache.clear();
-        fractureCellCache.clear();
         chunkCache.clear();
         dynamicShardKeys.clear();
       }

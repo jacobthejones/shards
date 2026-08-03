@@ -256,44 +256,6 @@ const normalizedShardArea = (shard: Shard) => Math.max(0, Math.min(1, (shardArea
 export const shardBreakFrequency = (shard: Shard) => 506 - 126 * normalizedShardArea(shard);
 export const shardCollisionFrequency = (shard: Shard) => 480 - 138 * normalizedShardArea(shard);
 
-const voronoiCellForSites = (shard: Shard, site: [number, number], sites: [number, number][]) => {
-  let polygon = shardPoints(shard).map(([x, y]) => [x, y] as [number, number]);
-  const [sx, sy] = site;
-  for (const [nx, ny] of sites) {
-    if (nx === sx && ny === sy) continue;
-    polygon = clipPolygon(
-      polygon,
-      nx - sx,
-      ny - sy,
-      (nx * nx + ny * ny - sx * sx - sy * sy) / 2,
-    );
-    if (polygon.length < 3) break;
-  }
-  return polygon;
-};
-
-export const impactVoronoiCellsFor = (shard: Shard, impact: ShardImpact): [number, number][][] => {
-  const baseAngle = Math.atan2(impact.inwardY, impact.inwardX);
-  const variation = (hash(shard.gx * 9.17 + impact.id * 1.37, shard.gy * 4.31 - impact.id * 2.19) - 0.5) * 0.28;
-  const localSites: [number, number][] = [];
-  for (let branch = 0; branch < 5; branch += 1) {
-    const angle = baseAngle + (branch - 2) * 0.34 + variation;
-    const distance = 0.08 + hash(shard.gx * 2.13 + impact.id * 3.71 + branch, shard.gy * 6.19 - branch) * 0.4;
-    localSites.push([
-      impact.x + Math.cos(angle) * distance,
-      impact.y + Math.sin(angle) * distance,
-    ]);
-  }
-
-  const sites: [number, number][] = [
-    [shard.sx, shard.sy],
-    [shard.sx + Math.cos(baseAngle + 1.7) * 0.34, shard.sy + Math.sin(baseAngle + 1.7) * 0.34],
-    [shard.sx + Math.cos(baseAngle - 1.7) * 0.34, shard.sy + Math.sin(baseAngle - 1.7) * 0.34],
-    ...localSites,
-  ];
-  return localSites.map((site) => voronoiCellForSites(shard, site, sites));
-};
-
 export type EmptyRegionBounds = {
   minX: number;
   maxX: number;

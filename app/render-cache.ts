@@ -17,15 +17,6 @@ export type RenderChunkCoordinate = {
   y: number;
 };
 
-export type RenderImpactState = {
-  id: number;
-  x: number;
-  y: number;
-  inwardX: number;
-  inwardY: number;
-  strength: number;
-};
-
 export type RenderShardState = {
   key: string;
   broken: boolean;
@@ -34,7 +25,6 @@ export type RenderShardState = {
   growth: number;
   growing: boolean;
   hue: number;
-  impacts: readonly RenderImpactState[];
 };
 
 const renderChunkIndexForCell = (cellCoordinate: number) => {
@@ -72,27 +62,16 @@ export const renderChunkRangeForCellBounds = (
   maxY: renderChunkIndexForCell(maxCellY),
 });
 
-const impactSignature = (impact: RenderImpactState) => [
-  impact.id,
-  impact.x,
-  impact.y,
-  impact.inwardX,
-  impact.inwardY,
-  impact.strength,
-].join(",");
-
 /**
  * A stable signature for the pixels a chunk should contain. Static geometry is
- * identified by the field seed and shard key; dynamic damage and fracture
- * state are included so healing and impacts invalidate only their own chunk.
+ * identified by the field seed and shard key; dynamic fill and growth state
+ * are included so healing invalidates only the affected chunk.
  */
 export const renderChunkSignature = (
   fieldSeed: number,
-  fracturesVisible: boolean,
   shards: readonly RenderShardState[],
 ) => [
   fieldSeed,
-  fracturesVisible ? 1 : 0,
   ...shards.map((shard) => [
     shard.key,
     shard.broken ? 1 : 0,
@@ -101,7 +80,6 @@ export const renderChunkSignature = (
     shard.growth,
     shard.growing ? 1 : 0,
     shard.hue,
-    fracturesVisible ? shard.impacts.map(impactSignature).join(";") : "",
   ].join("|")),
 ].join("/");
 
