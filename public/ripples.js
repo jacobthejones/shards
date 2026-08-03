@@ -12,7 +12,7 @@
   const GEOMETRY_EPSILON = 0.000001;
   const OFFSET_ARC_SEGMENTS = 20;
   const FIELD_BOUNDARY_SEGMENTS = 64;
-  const MAX_REGION_PIECES = 32;
+  const MAX_REGION_PIECES = 48;
   const SOURCE_RADIUS = 0.014;
   const ELEMENTS = [
     { name: "water", hue: 196, color: "#9ed9ee", beats: 2 },
@@ -129,7 +129,25 @@
   };
   const limitRegionPieces = (polygons) => {
     if (polygons.length <= MAX_REGION_PIECES) return polygons;
-    return [convexHull(polygons.flat())];
+    const compact = polygons.map((polygon) => ({ polygon, bounds: polygonBounds(polygon) }));
+    let merged = true;
+    while (merged && compact.length > MAX_REGION_PIECES) {
+      merged = false;
+      for (let firstIndex = 0; firstIndex < compact.length && !merged; firstIndex += 1) {
+        for (let secondIndex = firstIndex + 1; secondIndex < compact.length; secondIndex += 1) {
+          if (!boundsOverlap(compact[firstIndex].bounds, compact[secondIndex].bounds)) continue;
+          const polygon = convexHull(compact[firstIndex].polygon.concat(compact[secondIndex].polygon));
+          compact[firstIndex] = { polygon, bounds: polygonBounds(polygon) };
+          compact.splice(secondIndex, 1);
+          merged = true;
+          break;
+        }
+      }
+    }
+    return compact
+      .sort((first, second) => Math.abs(polygonArea(second.polygon)) - Math.abs(polygonArea(first.polygon)))
+      .slice(0, MAX_REGION_PIECES)
+      .map(({ polygon }) => polygon);
   };
   const expandPolygon = (polygon, distance) => {
     if (!polygon.length || distance <= GEOMETRY_EPSILON) return polygon;
