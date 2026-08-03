@@ -213,7 +213,9 @@
     context.arc(0, 0, 1, 0, Math.PI * 2);
     context.clip();
     context.imageSmoothingEnabled = true;
+    context.filter = "blur(2px)";
     context.drawImage(fieldCanvas, -1, -1, 2, 2);
+    context.filter = "none";
     context.restore();
   };
   const drawFieldOutline = (fieldRadius, pixelScale) => {
