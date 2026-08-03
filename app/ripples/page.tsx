@@ -119,12 +119,12 @@ export default function Ripples() {
           </div>
           <div style={copyStyle}>
             <strong style={{ color: "#f4f4e9", fontSize: 13, fontWeight: 600, letterSpacing: "0.3em" }}>RIPPLES</strong>
-            <span style={labelStyle}>AFTER THE FIELD / 15 SOURCES</span>
+            <span style={labelStyle}>AFTER THE FIELD / WATER · PLANT · FIRE</span>
           </div>
         </div>
-        <div style={topNoteStyle}>A quiet geometry of light</div>
+        <div style={topNoteStyle}>A quiet chemistry of light</div>
       </header>
-      <div style={bottomNoteStyle}>WAVEFRONTS / SHARED BOUNDARIES</div>
+      <div style={bottomNoteStyle}>ELEMENTAL FRONTS / QUIET REACTIONS</div>
       <a style={backStyle} href="../">BACK TO SHARDS</a>
       <script src="../ripples.js" defer />
     </main>

@@ -5,6 +5,8 @@ export const metadata: Metadata = {
   description: "A quiet wavefront study after the shards have gone still.",
 };
 
+export const dynamic = "force-static";
+
 export default function RipplesLayout({
   children,
 }: Readonly<{
