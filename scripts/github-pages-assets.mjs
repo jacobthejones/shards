@@ -5,4 +5,5 @@ export const rewriteProjectSiteAssetReferences = (source, assetVersion) => sourc
   .replaceAll(/(?<!\/shards)\/assets\//g, "/shards/assets/")
   .replaceAll(/(?<!\/shards)\/favicon\.svg/g, "/shards/favicon.svg")
   .replaceAll(/(?<!\/shards)\/simulation\.wasm/g, "/shards/simulation.wasm")
-  .replaceAll(/\/shards\/simulation\.wasm(?:\?v=[^`"']+)?/g, `/shards/simulation.wasm?v=${assetVersion}`);
+  .replaceAll(/\/shards\/simulation\.wasm(?:\?v=[^`"']+)?/g, `/shards/simulation.wasm?v=${assetVersion}`)
+  .replaceAll(/ripples\.js(?:\?v=[^`"']+)?/g, `ripples.js?v=${assetVersion}`);

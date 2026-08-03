@@ -38,3 +38,10 @@ test("Pages preparation leaves RSC resource URLs without asset query mutations",
 
   assert.equal(rewritten, source);
 });
+
+test("Pages asset preparation cache-busts the ripple prototype", () => {
+  const source = '<script src="../ripples.js" defer></script>';
+  const rewritten = rewriteProjectSiteAssetReferences(source, "abc123def456");
+
+  assert.equal(rewritten, '<script src="../ripples.js?v=abc123def456" defer></script>');
+});
