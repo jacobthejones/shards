@@ -44,7 +44,7 @@
 #define CONDUCTION_SPLASH_DAMAGE 0.05
 #define CHOSEN_ONE_DAMAGE_MULTIPLIER 5.0
 #define CHOSEN_BALL_INDEX 0
-#define SIMULATION_RUNTIME_VERSION 19
+#define SIMULATION_RUNTIME_VERSION 20
 #define SEED_SPAWN_MEAN_SECONDS 300.0
 #define SEED_CHARGE_RATE 0.01
 #define SEED_LUMENS 10.0
@@ -1023,7 +1023,12 @@ static void damage_shard(
 }
 
 static double damage_multiplier_for_ball(int32_t ball) {
-  double multiplier = 1.0;
+  // Ball mass is constant, so kinetic-energy ratio is velocity squared
+  // relative to the standard starting ball. A normal-speed ball still deals
+  // the base damage, while energy transferred by ball collisions matters.
+  double reference_energy = INITIAL_BALL_SPEED * INITIAL_BALL_SPEED;
+  double ball_energy = BALL_VX[ball] * BALL_VX[ball] + BALL_VY[ball] * BALL_VY[ball];
+  double multiplier = reference_energy > 0.0 ? ball_energy / reference_energy : 1.0;
   if (chosen_one_unlocked && ball == CHOSEN_BALL_INDEX) multiplier *= CHOSEN_ONE_DAMAGE_MULTIPLIER;
   if (BALL_CORROSIVE_WAKE_CHARGED[ball]) multiplier *= CHOSEN_ONE_DAMAGE_MULTIPLIER;
   return multiplier;

@@ -71,6 +71,52 @@ const pointOnBoundarySide = (point: [number, number], first: [number, number], s
     && projection <= lengthSquared + 0.001;
 };
 
+const damageFromSingleShardImpact = async (speed: number) => {
+  const wasm = await loadRuntime();
+  wasm.initialize_real_simulation(321, 654, 1);
+  wasm.set_all_shards_broken(1);
+
+  let target: { shard: number; ax: number; ay: number; bx: number; by: number } | undefined;
+  for (let shard = 0; shard < wasm.get_shard_count() && !target; shard += 1) {
+    if (Math.abs(wasm.get_shard_gx(shard)) > 4 || Math.abs(wasm.get_shard_gy(shard)) > 4) continue;
+    const pointCount = wasm.get_shard_point_count(shard);
+    for (let edge = 0; edge < pointCount; edge += 1) {
+      if (wasm.is_shard_boundary_edge(shard, edge)) continue;
+      const next = (edge + 1) % pointCount;
+      const candidate = {
+        shard,
+        ax: wasm.get_shard_point_x(shard, edge),
+        ay: wasm.get_shard_point_y(shard, edge),
+        bx: wasm.get_shard_point_x(shard, next),
+        by: wasm.get_shard_point_y(shard, next),
+      };
+      if (Math.hypot(candidate.bx - candidate.ax, candidate.by - candidate.ay) > 0.2) target = candidate;
+    }
+  }
+  assert.ok(target, "an interior shard edge should be available for the impact test");
+  wasm.set_shard_broken(target.shard, 0);
+
+  const midpointX = (target.ax + target.bx) / 2;
+  const midpointY = (target.ay + target.by) / 2;
+  let outwardX = midpointX - wasm.get_shard_sx(target.shard);
+  let outwardY = midpointY - wasm.get_shard_sy(target.shard);
+  const outwardLength = Math.hypot(outwardX, outwardY);
+  outwardX /= outwardLength;
+  outwardY /= outwardLength;
+  wasm.set_ball_state(
+    0,
+    midpointX + outwardX * (0.095 + 0.002),
+    midpointY + outwardY * (0.095 + 0.002),
+    -outwardX * speed,
+    -outwardY * speed,
+    0,
+  );
+  wasm.step_real_simulation(1);
+
+  assert.equal(wasm.get_event_type(0), 1);
+  return 1 - wasm.get_shard_health(target.shard);
+};
+
 test("the shipped C++ runtime initializes a contiguous Voronoi field", async () => {
   const wasm = await loadRuntime();
   wasm.initialize_real_simulation(1234, 5678, 1);
@@ -280,6 +326,16 @@ test("the C++ runtime preserves the fixed ball speed and upgrade cost", async ()
   assert.ok(Math.abs(Math.hypot(wasm.get_ball_vx(1), wasm.get_ball_vy(1)) - initialSpeed) < 1e-12);
   assert.equal(wasm.get_score(), 0);
   assert.equal(wasm.add_ball(), 0);
+});
+
+test("shard impact damage scales with ball kinetic energy", async () => {
+  const normalDamage = await damageFromSingleShardImpact(INITIAL_BALL_SPEED);
+  const doubleSpeedDamage = await damageFromSingleShardImpact(INITIAL_BALL_SPEED * 2);
+  const halfSpeedDamage = await damageFromSingleShardImpact(INITIAL_BALL_SPEED / 2);
+
+  assert.ok(Math.abs(normalDamage - 0.2) < 1e-9);
+  assert.ok(Math.abs(doubleSpeedDamage - 0.8) < 1e-9, "doubling speed should quadruple impact damage");
+  assert.ok(Math.abs(halfSpeedDamage - 0.05) < 1e-9, "halving speed should quarter impact damage");
 });
 
 test("overlapping balls separate and exchange their normal velocity", async () => {
