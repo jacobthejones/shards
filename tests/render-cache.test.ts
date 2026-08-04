@@ -8,6 +8,7 @@ import {
   renderChunkCoordinateForCell,
   renderChunkKey,
   renderChunkOriginForCoordinate,
+  renderChunkOwnsCell,
   renderChunkRangeForCellBounds,
   renderChunkSignature,
 } from "../app/render-cache";
@@ -36,6 +37,9 @@ test("chunk coordinates cover positive and negative cell indices without gaps", 
   assert.deepEqual(renderChunkCoordinateForCell(RENDER_CHUNK_SIZE - 1, -1), { x: 0, y: -1 });
   assert.deepEqual(renderChunkCoordinateForCell(RENDER_CHUNK_SIZE, -RENDER_CHUNK_SIZE), { x: 1, y: -1 });
   assert.deepEqual(renderChunkCoordinateForCell(-RENDER_CHUNK_SIZE, -RENDER_CHUNK_SIZE - 1), { x: -1, y: -2 });
+  assert.equal(renderChunkOwnsCell({ x: 0, y: 0 }, 7, 7), true);
+  assert.equal(renderChunkOwnsCell({ x: 1, y: 0 }, 7, 7), false);
+  assert.equal(renderChunkOwnsCell({ x: -1, y: -1 }, -1, -1), true);
   assert.deepEqual(renderChunkOriginForCoordinate({ x: -2, y: 3 }), { x: -2 * RENDER_CHUNK_SIZE, y: 3 * RENDER_CHUNK_SIZE });
   assert.equal(renderChunkKey({ x: -2, y: 3 }), "-2:3");
 });

@@ -57,6 +57,7 @@ import {
   renderChunkCoordinateForCell,
   renderChunkKey,
   renderChunkOriginForCoordinate,
+  renderChunkOwnsCell,
   renderChunkRangeForCellBounds,
 } from "./render-cache";
 
@@ -660,10 +661,9 @@ export default function Home() {
       const seeds = sim.seeds
         .filter((seed) => {
           const shard = sim.shards.get(seed.key);
-          return shard && shard.gx >= origin.x - RENDER_CHUNK_PADDING
-            && shard.gx < origin.x + RENDER_CHUNK_SIZE + RENDER_CHUNK_PADDING
-            && shard.gy >= origin.y - RENDER_CHUNK_PADDING
-            && shard.gy < origin.y + RENDER_CHUNK_SIZE + RENDER_CHUNK_PADDING;
+          // Chunk surfaces overlap by padding. Render each glow only in its
+          // owning chunk or the overlap composites it and brightens one side.
+          return shard && renderChunkOwnsCell(coordinate, shard.gx, shard.gy);
         })
         .sort((left, right) => left.key.localeCompare(right.key));
       const signature = `${sim.fieldSeed}|${seeds.map((seed) => `${seed.key}:${Math.round(seed.growth * 100)}:${Math.round(seed.charge * 100)}`).join("|")}`;

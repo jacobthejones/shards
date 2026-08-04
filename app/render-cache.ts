@@ -38,6 +38,11 @@ export const renderChunkCoordinateForCell = (gx: number, gy: number): RenderChun
   y: renderChunkIndexForCell(gy),
 });
 
+export const renderChunkOwnsCell = (coordinate: RenderChunkCoordinate, gx: number, gy: number) => {
+  const owner = renderChunkCoordinateForCell(gx, gy);
+  return owner.x === coordinate.x && owner.y === coordinate.y;
+};
+
 export const renderChunkOriginForCoordinate = ({ x, y }: RenderChunkCoordinate) => ({
   x: x * RENDER_CHUNK_SIZE,
   y: y * RENDER_CHUNK_SIZE,
