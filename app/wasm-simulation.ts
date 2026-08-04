@@ -11,7 +11,7 @@ import {
 import type { SaveState } from "./save-state";
 import { TECH_IDS, type TechId } from "./tech-tree";
 
-export const WASM_RUNTIME_VERSION = 16;
+export const WASM_RUNTIME_VERSION = 17;
 
 type WasmExports = {
   initialize_real_simulation: (seed: number, fieldSeed: number, balls: number) => void;
