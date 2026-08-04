@@ -94,8 +94,13 @@ test("keeps the prototype self-contained", async () => {
   assert.match(page, /shardCentroid/);
   assert.match(page, /seedCellAppearanceRef/);
   assert.match(page, /Adjust seeded cell appearance/);
-  assert.match(page, /type="color"/);
-  assert.match(page, /type="range"/);
+  assert.match(page, /Seed cell hex color/);
+  assert.match(page, /shards\.seed-cell\.appearance/);
+  assert.match(page, /Hue <output>/);
+  assert.match(page, /Saturation <output>/);
+  assert.match(page, /Value <output>/);
+  assert.match(page, /max="100"/);
+  assert.doesNotMatch(page, /type="color"/);
   assert.match(page, /const completed = charge >= 1 - 0\.000001/);
   assert.doesNotMatch(page, /targetContext\.clip\(path\)/);
   assert.match(page, /TECH_TREE_BRANCHES/);

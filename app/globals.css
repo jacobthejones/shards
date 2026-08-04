@@ -111,7 +111,7 @@ button:focus-visible {
   position: absolute;
   top: 42px;
   right: 0;
-  width: 174px;
+  width: 188px;
   padding: 12px;
   border: 1px solid rgba(159, 216, 205, 0.2);
   background: rgba(5, 18, 24, 0.78);
@@ -130,30 +130,40 @@ button:focus-visible {
 
 .seed-style-title { display: block; margin-bottom: 11px; color: var(--teal-bright); }
 
-.seed-color-control,
+.seed-hex-control,
+.seed-hsv-control,
 .seed-opacity-control {
   display: flex;
   color: var(--muted);
 }
 
-.seed-color-control {
+.seed-hex-control {
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 10px;
+  margin-bottom: 11px;
 }
 
-.seed-color-control input {
-  width: 28px;
-  height: 22px;
-  padding: 1px;
+.seed-hex-control input {
+  width: 82px;
+  height: 23px;
+  padding: 0 5px;
   border: 1px solid var(--line);
-  background: transparent;
-  cursor: pointer;
+  background: rgba(2, 10, 14, 0.52);
+  color: var(--teal-bright);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
 
+.seed-hsv-control,
 .seed-opacity-control { flex-direction: column; gap: 7px; }
+.seed-hsv-control { margin-bottom: 9px; }
+.seed-hsv-control span,
 .seed-opacity-control span { display: flex; justify-content: space-between; }
+.seed-hsv-control output,
 .seed-opacity-control output { color: var(--teal); }
+.seed-hsv-control input,
 .seed-opacity-control input { width: 100%; accent-color: var(--teal); }
 
 .game-topbar {
