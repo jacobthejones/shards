@@ -264,6 +264,7 @@ export default function Home() {
   const emptyCircleRadiusRef = useRef(0);
   const emptyCircleCenterXRef = useRef(0);
   const emptyCircleCenterYRef = useRef(0);
+  const seedCellAppearanceRef = useRef({ color: "#c6efcf", opacity: 14 });
   const [hud, setHud] = useState<Hud>({
     score: STARTING_LUMENS,
     arrows: 1,
@@ -276,6 +277,9 @@ export default function Home() {
   const [techTreeOpen, setTechTreeOpen] = useState(false);
   const [selectedTechId, setSelectedTechId] = useState<TechId | null>(null);
   const [unlockedTechs, setUnlockedTechs] = useState<string[]>([]);
+  const [seedAppearanceOpen, setSeedAppearanceOpen] = useState(false);
+  const [seedCellColor, setSeedCellColor] = useState("#c6efcf");
+  const [seedCellOpacity, setSeedCellOpacity] = useState(14);
 
   if (simRef.current == null) simRef.current = createRenderSimulation();
 
@@ -309,16 +313,17 @@ export default function Home() {
   }, [startSimulation, togglePause]);
 
   useEffect(() => {
-    if (!supportOpen && !techTreeOpen) return;
+    if (!supportOpen && !techTreeOpen && !seedAppearanceOpen) return;
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
       setSupportOpen(false);
       setTechTreeOpen(false);
       setSelectedTechId(null);
+      setSeedAppearanceOpen(false);
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [supportOpen, techTreeOpen]);
+  }, [supportOpen, techTreeOpen, seedAppearanceOpen]);
 
   const toggleAudio = async () => {
     const sim = simRef.current;
@@ -344,6 +349,16 @@ export default function Home() {
     }
     sendWorkerCommand({ type: "addBall" });
     playTone(sim, 523.25, 0.3, 0.04);
+  };
+
+  const changeSeedCellColor = (color: string) => {
+    seedCellAppearanceRef.current.color = color;
+    setSeedCellColor(color);
+  };
+
+  const changeSeedCellOpacity = (opacity: number) => {
+    seedCellAppearanceRef.current.opacity = opacity;
+    setSeedCellOpacity(opacity);
   };
 
   const selectedTech = selectedTechId
@@ -615,8 +630,12 @@ export default function Home() {
       const charge = Math.max(0, Math.min(1, seed.charge));
       const hue = 105 + shard.seed * 48;
       const [centerX, centerY] = shardCentroid(shard);
-      targetContext.fillStyle = `hsla(${hue}, 48%, 72%, 0.14)`;
+      const seedCellAppearance = seedCellAppearanceRef.current;
+      targetContext.save();
+      targetContext.globalAlpha = seedCellAppearance.opacity / 100;
+      targetContext.fillStyle = seedCellAppearance.color;
       targetContext.fill(shardPathFor(shard));
+      targetContext.restore();
       const completed = charge >= 1 - 0.000001;
       const haloRadius = completed ? 0.28 : 0.1 + charge * 0.1;
       const coreRadius = completed ? 0.062 : 0.022 + charge * 0.016;
@@ -663,7 +682,8 @@ export default function Home() {
           return shard && renderChunkOwnsCell(coordinate, shard.gx, shard.gy);
         })
         .sort((left, right) => left.key.localeCompare(right.key));
-      const signature = `${sim.fieldSeed}|${seeds.map((seed) => `${seed.key}:${Math.round(seed.growth * 100)}:${Math.round(seed.charge * 100)}`).join("|")}`;
+      const seedCellAppearance = seedCellAppearanceRef.current;
+      const signature = `${sim.fieldSeed}|${seedCellAppearance.color}:${seedCellAppearance.opacity}|${seeds.map((seed) => `${seed.key}:${Math.round(seed.growth * 100)}:${Math.round(seed.charge * 100)}`).join("|")}`;
       const surface = chunkCache.getOrCreate(
         key,
         signature,
@@ -1096,6 +1116,38 @@ export default function Home() {
       </div>
 
       <div className="game-state" ref={gameStateRef}><span className="live-dot" /><span>{hud.rate.toFixed(1)} breaks per min</span></div>
+
+      <div className="seed-style-control">
+        <button
+          className={`seed-style-toggle ${seedAppearanceOpen ? "open" : ""}`}
+          onClick={() => setSeedAppearanceOpen((open) => !open)}
+          aria-label="Adjust seeded cell appearance"
+          aria-expanded={seedAppearanceOpen}
+          title="Adjust seeded cells"
+        >
+          <span className="seed-style-swatch" style={{ backgroundColor: seedCellColor, opacity: seedCellOpacity / 100 }} />
+        </button>
+        {seedAppearanceOpen && (
+          <section className="seed-style-panel" aria-label="Seeded cell appearance">
+            <span className="seed-style-title">Seed cells</span>
+            <label className="seed-color-control">
+              <span>Color</span>
+              <input type="color" value={seedCellColor} onChange={(event) => changeSeedCellColor(event.target.value)} />
+            </label>
+            <label className="seed-opacity-control">
+              <span>Opacity <output>{seedCellOpacity}%</output></span>
+              <input
+                type="range"
+                min="0"
+                max="45"
+                step="1"
+                value={seedCellOpacity}
+                onChange={(event) => changeSeedCellOpacity(Number(event.target.value))}
+              />
+            </label>
+          </section>
+        )}
+      </div>
 
       <div className="bottom-hud" ref={bottomHudRef}>
         <div className="upgrade-dock" aria-label="Upgrades">

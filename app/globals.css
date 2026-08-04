@@ -70,6 +70,92 @@ button:focus-visible {
   pointer-events: none;
 }
 
+.seed-style-control {
+  position: absolute;
+  z-index: 3;
+  top: 138px;
+  right: 32px;
+  pointer-events: auto;
+}
+
+.seed-style-toggle {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  padding: 8px;
+  place-items: center;
+  border: 1px solid rgba(159, 216, 205, 0.2);
+  border-radius: 50%;
+  background: rgba(5, 18, 24, 0.64);
+  color: var(--teal-bright);
+  cursor: pointer;
+  backdrop-filter: blur(10px);
+}
+
+.seed-style-toggle:hover,
+.seed-style-toggle.open {
+  border-color: rgba(147, 225, 207, 0.48);
+  background: rgba(20, 65, 66, 0.6);
+}
+
+.seed-style-swatch {
+  display: block;
+  width: 13px;
+  height: 13px;
+  border: 1px solid rgba(238, 246, 239, 0.82);
+  border-radius: 50%;
+  box-shadow: 0 0 10px currentColor;
+}
+
+.seed-style-panel {
+  position: absolute;
+  top: 42px;
+  right: 0;
+  width: 174px;
+  padding: 12px;
+  border: 1px solid rgba(159, 216, 205, 0.2);
+  background: rgba(5, 18, 24, 0.78);
+  box-shadow: 0 12px 34px rgba(0, 0, 0, 0.24);
+  backdrop-filter: blur(12px);
+}
+
+.seed-style-title,
+.seed-style-panel label,
+.seed-style-panel span,
+.seed-style-panel output {
+  font-size: 8px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.seed-style-title { display: block; margin-bottom: 11px; color: var(--teal-bright); }
+
+.seed-color-control,
+.seed-opacity-control {
+  display: flex;
+  color: var(--muted);
+}
+
+.seed-color-control {
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.seed-color-control input {
+  width: 28px;
+  height: 22px;
+  padding: 1px;
+  border: 1px solid var(--line);
+  background: transparent;
+  cursor: pointer;
+}
+
+.seed-opacity-control { flex-direction: column; gap: 7px; }
+.seed-opacity-control span { display: flex; justify-content: space-between; }
+.seed-opacity-control output { color: var(--teal); }
+.seed-opacity-control input { width: 100%; accent-color: var(--teal); }
+
 .game-topbar {
   top: 0;
   right: 0;
@@ -594,6 +680,7 @@ button:focus-visible {
 @media (max-width: 760px) {
   .game-topbar { padding: 19px 17px; }
   .game-state { top: 76px; left: 18px; }
+  .seed-style-control { top: 112px; right: 17px; }
   .game-actions { gap: 6px; }
   .lumen-readout { gap: 6px; padding-right: 7px; padding-left: 7px; }
   .sound-button { width: 32px; padding: 0; justify-content: center; font-size: 0; }
