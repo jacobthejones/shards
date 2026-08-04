@@ -68,73 +68,8 @@ type PendingWorkerCommandType = Exclude<InteractiveWorkerCommand["type"], "addBa
 const AUDIO_GAIN = 9;
 const AUDIO_MASTER_GAIN = 0.78;
 const MAX_AUDIO_VOICES = 12;
-const DEFAULT_SEED_CELL_COLOR = "#c6efcf";
-const SEED_CELL_APPEARANCE_STORAGE_KEY = "shards.seed-cell.appearance";
-
-type HsvColor = { hue: number; saturation: number; value: number };
-type SeedCellAppearance = { color: string; opacity: number };
-
-const clamp = (value: number, minimum: number, maximum: number) => Math.max(minimum, Math.min(maximum, value));
-
-const hexToHsv = (hex: string): HsvColor => {
-  const red = Number.parseInt(hex.slice(1, 3), 16) / 255;
-  const green = Number.parseInt(hex.slice(3, 5), 16) / 255;
-  const blue = Number.parseInt(hex.slice(5, 7), 16) / 255;
-  const maximum = Math.max(red, green, blue);
-  const minimum = Math.min(red, green, blue);
-  const difference = maximum - minimum;
-  let hue = 0;
-  if (difference > 0) {
-    if (maximum === red) hue = 60 * (((green - blue) / difference + 6) % 6);
-    else if (maximum === green) hue = 60 * ((blue - red) / difference + 2);
-    else hue = 60 * ((red - green) / difference + 4);
-  }
-  return {
-    hue: Math.round(hue),
-    saturation: Math.round(maximum === 0 ? 0 : (difference / maximum) * 100),
-    value: Math.round(maximum * 100),
-  };
-};
-
-const hsvToHex = (hue: number, saturation: number, value: number) => {
-  const normalizedHue = ((hue % 360) + 360) % 360;
-  const chroma = (value / 100) * (saturation / 100);
-  const intermediate = chroma * (1 - Math.abs((normalizedHue / 60) % 2 - 1));
-  const match = value / 100 - chroma;
-  const [red, green, blue] = normalizedHue < 60
-    ? [chroma, intermediate, 0]
-    : normalizedHue < 120
-      ? [intermediate, chroma, 0]
-      : normalizedHue < 180
-        ? [0, chroma, intermediate]
-        : normalizedHue < 240
-          ? [0, intermediate, chroma]
-          : normalizedHue < 300
-            ? [intermediate, 0, chroma]
-            : [chroma, 0, intermediate];
-  const channel = (component: number) => Math.round((component + match) * 255).toString(16).padStart(2, "0");
-  return `#${channel(red)}${channel(green)}${channel(blue)}`;
-};
-
-const readSeedCellAppearance = (): SeedCellAppearance => {
-  if (typeof window === "undefined") return { color: DEFAULT_SEED_CELL_COLOR, opacity: 14 };
-  try {
-    const saved = window.localStorage.getItem(SEED_CELL_APPEARANCE_STORAGE_KEY);
-    if (!saved) return { color: DEFAULT_SEED_CELL_COLOR, opacity: 14 };
-    const appearance = JSON.parse(saved) as { color?: unknown; opacity?: unknown };
-    if (typeof appearance.color !== "string" || !/^#[0-9a-f]{6}$/i.test(appearance.color)) {
-      return { color: DEFAULT_SEED_CELL_COLOR, opacity: 14 };
-    }
-    return {
-      color: appearance.color.toLowerCase(),
-      opacity: typeof appearance.opacity === "number" && Number.isFinite(appearance.opacity)
-        ? clamp(Math.round(appearance.opacity), 0, 100)
-        : 14,
-    };
-  } catch {
-    return { color: DEFAULT_SEED_CELL_COLOR, opacity: 14 };
-  }
-};
+const SEEDED_CELL_BACKGROUND_COLOR = "#043800";
+const SEEDED_CELL_BACKGROUND_OPACITY = 0.72;
 
 const reserveAudioVoice = (audio: Simulation["audio"]) => {
   if (!audio || audio.activeVoices >= MAX_AUDIO_VOICES) return false;
@@ -317,8 +252,6 @@ const createRenderSimulation = (): Simulation => ({
 });
 
 export default function Home() {
-  const [initialSeedCellAppearance] = useState(readSeedCellAppearance);
-  const initialSeedCellHsv = hexToHsv(initialSeedCellAppearance.color);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const gameTopbarRef = useRef<HTMLDivElement | null>(null);
   const gameStateRef = useRef<HTMLDivElement | null>(null);
@@ -333,7 +266,6 @@ export default function Home() {
   const emptyCircleRadiusRef = useRef(0);
   const emptyCircleCenterXRef = useRef(0);
   const emptyCircleCenterYRef = useRef(0);
-  const seedCellAppearanceRef = useRef(initialSeedCellAppearance);
   const [hud, setHud] = useState<Hud>({
     score: STARTING_LUMENS,
     arrows: 1,
@@ -346,13 +278,6 @@ export default function Home() {
   const [techTreeOpen, setTechTreeOpen] = useState(false);
   const [selectedTechId, setSelectedTechId] = useState<TechId | null>(null);
   const [unlockedTechs, setUnlockedTechs] = useState<string[]>([]);
-  const [seedAppearanceOpen, setSeedAppearanceOpen] = useState(false);
-  const [seedCellColor, setSeedCellColor] = useState(initialSeedCellAppearance.color);
-  const [seedCellHexInput, setSeedCellHexInput] = useState(initialSeedCellAppearance.color.toUpperCase());
-  const [seedCellHue, setSeedCellHue] = useState(initialSeedCellHsv.hue);
-  const [seedCellSaturation, setSeedCellSaturation] = useState(initialSeedCellHsv.saturation);
-  const [seedCellValue, setSeedCellValue] = useState(initialSeedCellHsv.value);
-  const [seedCellOpacity, setSeedCellOpacity] = useState(initialSeedCellAppearance.opacity);
 
   if (simRef.current == null) simRef.current = createRenderSimulation();
 
@@ -386,17 +311,16 @@ export default function Home() {
   }, [startSimulation, togglePause]);
 
   useEffect(() => {
-    if (!supportOpen && !techTreeOpen && !seedAppearanceOpen) return;
+    if (!supportOpen && !techTreeOpen) return;
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
       setSupportOpen(false);
       setTechTreeOpen(false);
       setSelectedTechId(null);
-      setSeedAppearanceOpen(false);
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [supportOpen, techTreeOpen, seedAppearanceOpen]);
+  }, [supportOpen, techTreeOpen]);
 
   const toggleAudio = async () => {
     const sim = simRef.current;
@@ -422,59 +346,6 @@ export default function Home() {
     }
     sendWorkerCommand({ type: "addBall" });
     playTone(sim, 523.25, 0.3, 0.04);
-  };
-
-  const changeSeedCellColor = (color: string) => {
-    const normalized = color.toLowerCase();
-    const hsv = hexToHsv(normalized);
-    seedCellAppearanceRef.current.color = normalized;
-    setSeedCellColor(normalized);
-    setSeedCellHexInput(normalized.toUpperCase());
-    setSeedCellHue(hsv.hue);
-    setSeedCellSaturation(hsv.saturation);
-    setSeedCellValue(hsv.value);
-    try {
-      window.localStorage.setItem(SEED_CELL_APPEARANCE_STORAGE_KEY, JSON.stringify({
-        color: normalized,
-        opacity: seedCellAppearanceRef.current.opacity,
-      }));
-    } catch {
-      // The control remains useful when storage is unavailable.
-    }
-  };
-
-  const changeSeedCellHsv = (hue: number, saturation: number, value: number) => {
-    const nextHue = clamp(Math.round(hue), 0, 360);
-    const nextSaturation = clamp(Math.round(saturation), 0, 100);
-    const nextValue = clamp(Math.round(value), 0, 100);
-    const color = hsvToHex(nextHue, nextSaturation, nextValue);
-    seedCellAppearanceRef.current.color = color;
-    setSeedCellColor(color);
-    setSeedCellHexInput(color.toUpperCase());
-    setSeedCellHue(nextHue);
-    setSeedCellSaturation(nextSaturation);
-    setSeedCellValue(nextValue);
-    try {
-      window.localStorage.setItem(SEED_CELL_APPEARANCE_STORAGE_KEY, JSON.stringify({
-        color,
-        opacity: seedCellAppearanceRef.current.opacity,
-      }));
-    } catch {
-      // The control remains useful when storage is unavailable.
-    }
-  };
-
-  const changeSeedCellOpacity = (opacity: number) => {
-    seedCellAppearanceRef.current.opacity = opacity;
-    setSeedCellOpacity(opacity);
-    try {
-      window.localStorage.setItem(SEED_CELL_APPEARANCE_STORAGE_KEY, JSON.stringify({
-        color: seedCellAppearanceRef.current.color,
-        opacity,
-      }));
-    } catch {
-      // The control remains useful when storage is unavailable.
-    }
   };
 
   const selectedTech = selectedTechId
@@ -746,10 +617,9 @@ export default function Home() {
       const charge = Math.max(0, Math.min(1, seed.charge));
       const hue = 105 + shard.seed * 48;
       const [centerX, centerY] = shardCentroid(shard);
-      const seedCellAppearance = seedCellAppearanceRef.current;
       targetContext.save();
-      targetContext.globalAlpha = seedCellAppearance.opacity / 100;
-      targetContext.fillStyle = seedCellAppearance.color;
+      targetContext.globalAlpha = SEEDED_CELL_BACKGROUND_OPACITY;
+      targetContext.fillStyle = SEEDED_CELL_BACKGROUND_COLOR;
       targetContext.fill(shardPathFor(shard));
       targetContext.restore();
       const completed = charge >= 1 - 0.000001;
@@ -798,8 +668,7 @@ export default function Home() {
           return shard && renderChunkOwnsCell(coordinate, shard.gx, shard.gy);
         })
         .sort((left, right) => left.key.localeCompare(right.key));
-      const seedCellAppearance = seedCellAppearanceRef.current;
-      const signature = `${sim.fieldSeed}|${seedCellAppearance.color}:${seedCellAppearance.opacity}|${seeds.map((seed) => `${seed.key}:${Math.round(seed.growth * 100)}:${Math.round(seed.charge * 100)}`).join("|")}`;
+      const signature = `${sim.fieldSeed}|${seeds.map((seed) => `${seed.key}:${Math.round(seed.growth * 100)}:${Math.round(seed.charge * 100)}`).join("|")}`;
       const surface = chunkCache.getOrCreate(
         key,
         signature,
@@ -1232,61 +1101,6 @@ export default function Home() {
       </div>
 
       <div className="game-state" ref={gameStateRef}><span className="live-dot" /><span>{hud.rate.toFixed(1)} breaks per min</span></div>
-
-      <div className="seed-style-control">
-        <button
-          className={`seed-style-toggle ${seedAppearanceOpen ? "open" : ""}`}
-          onClick={() => setSeedAppearanceOpen((open) => !open)}
-          aria-label="Adjust seeded cell appearance"
-          aria-expanded={seedAppearanceOpen}
-          title="Adjust seeded cells"
-        >
-          <span className="seed-style-swatch" style={{ backgroundColor: seedCellColor, opacity: seedCellOpacity / 100 }} />
-        </button>
-        {seedAppearanceOpen && (
-          <section className="seed-style-panel" aria-label="Seeded cell appearance">
-            <span className="seed-style-title">Seed cells</span>
-            <label className="seed-hex-control">
-              <span>Hex</span>
-              <input
-                value={seedCellHexInput}
-                maxLength={7}
-                spellCheck={false}
-                aria-label="Seed cell hex color"
-                onChange={(event) => {
-                  const value = event.target.value;
-                  setSeedCellHexInput(value);
-                  if (/^#[0-9a-f]{6}$/i.test(value)) changeSeedCellColor(value);
-                }}
-                onBlur={() => setSeedCellHexInput(seedCellColor.toUpperCase())}
-              />
-            </label>
-            <label className="seed-hsv-control">
-              <span>Hue <output>{seedCellHue}°</output></span>
-              <input type="range" min="0" max="360" step="1" value={seedCellHue} onChange={(event) => changeSeedCellHsv(Number(event.target.value), seedCellSaturation, seedCellValue)} />
-            </label>
-            <label className="seed-hsv-control">
-              <span>Saturation <output>{seedCellSaturation}%</output></span>
-              <input type="range" min="0" max="100" step="1" value={seedCellSaturation} onChange={(event) => changeSeedCellHsv(seedCellHue, Number(event.target.value), seedCellValue)} />
-            </label>
-            <label className="seed-hsv-control">
-              <span>Value <output>{seedCellValue}%</output></span>
-              <input type="range" min="0" max="100" step="1" value={seedCellValue} onChange={(event) => changeSeedCellHsv(seedCellHue, seedCellSaturation, Number(event.target.value))} />
-            </label>
-            <label className="seed-opacity-control">
-              <span>Opacity <output>{seedCellOpacity}%</output></span>
-              <input
-                type="range"
-                min="0"
-                max="100"
-                step="1"
-                value={seedCellOpacity}
-                onChange={(event) => changeSeedCellOpacity(Number(event.target.value))}
-              />
-            </label>
-          </section>
-        )}
-      </div>
 
       <div className="bottom-hud" ref={bottomHudRef}>
         <div className="upgrade-dock" aria-label="Upgrades">
