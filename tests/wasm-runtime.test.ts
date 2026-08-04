@@ -85,6 +85,10 @@ test("the shipped C++ runtime initializes a contiguous Voronoi field", async () 
   assert.equal(wasm.get_total_hits(), 0);
   assert.equal(wasm.get_total_breaks(), 0);
   assert.equal(wasm.get_simulation_runtime_version(), WASM_RUNTIME_VERSION);
+  for (let shard = 0; shard < shardCount; shard += 1) {
+    const hue = wasm.get_shard_hue(shard);
+    assert.ok(hue >= 198 && hue < 327, "shards should stay in the blue-to-violet palette");
+  }
 });
 
 test("initial and added balls spawn inside the expanded field boundary", async () => {

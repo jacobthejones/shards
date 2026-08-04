@@ -44,7 +44,7 @@
 #define CONDUCTION_SPLASH_DAMAGE 0.05
 #define CHOSEN_ONE_DAMAGE_MULTIPLIER 5.0
 #define CHOSEN_BALL_INDEX 0
-#define SIMULATION_RUNTIME_VERSION 17
+#define SIMULATION_RUNTIME_VERSION 18
 #define SEED_SPAWN_MEAN_SECONDS 300.0
 #define SEED_GROWTH_RATE 0.01
 #define SEED_CHARGE_RATE 0.01
@@ -1105,7 +1105,9 @@ static int32_t build_field_geometry(double field_seed) {
       SHARD_GROWING[shard] = 0;
       SHARD_GROWTH_PENDING[shard] = 0;
       SHARD_SEED[shard] = seeded_hash((double)gx + 4.8, (double)gy - 2.3, field_seed);
-      SHARD_HUE[shard] = 162.0 + seeded_hash((double)gx + 4.8, (double)gy - 2.3, field_seed) * 72.0 + sqrt((double)gx * gx + (double)gy * gy) * 2.2;
+      // Keep shards in the blue-to-violet range so they remain distinct from
+      // the green used for Germination seeds.
+      SHARD_HUE[shard] = 198.0 + seeded_hash((double)gx + 4.8, (double)gy - 2.3, field_seed) * 62.0 + sqrt((double)gx * gx + (double)gy * gy) * 1.45;
       SHARD_BROKEN[shard] = circle_intersects_polygon(0.0, 0.0, BASE_BALL_RADIUS, shard);
       SHARD_IMPACT_COUNT[shard] = 0;
       SHARD_DAMAGED[shard] = 0;
