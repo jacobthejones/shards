@@ -42,7 +42,7 @@
 #define CONDUCTION_SPLASH_DAMAGE 0.05
 #define CHOSEN_ONE_DAMAGE_MULTIPLIER 5.0
 #define CHOSEN_BALL_INDEX 0
-#define SIMULATION_RUNTIME_VERSION 13
+#define SIMULATION_RUNTIME_VERSION 14
 #define BOUNCE_JITTER_RADIANS (0.02 * 3.1415926535897932384626433832795 / 180.0)
 #define COLLISION_SEPARATION 0.004
 #define KINETIC_ENERGY_TOLERANCE 0.000000000001
@@ -1515,25 +1515,22 @@ static void preserve_total_ball_kinetic_energy(void) {
 
   if (current_energy + KINETIC_ENERGY_TOLERANCE < target_energy) {
     double deficit_energy = target_energy - current_energy;
-    int32_t slowest_ball = 0;
-    double slowest_energy = BALL_VX[0] * BALL_VX[0] + BALL_VY[0] * BALL_VY[0];
-    for (int32_t ball = 1; ball < ball_count; ball += 1) {
+    int32_t slowest_ball = -1;
+    double slowest_energy = 0.0;
+    for (int32_t ball = 0; ball < ball_count; ball += 1) {
       double ball_energy = BALL_VX[ball] * BALL_VX[ball] + BALL_VY[ball] * BALL_VY[ball];
-      if (ball_energy < slowest_energy) {
+      if (ball_energy <= KINETIC_ENERGY_TOLERANCE) continue;
+      if (slowest_ball < 0 || ball_energy < slowest_energy) {
         slowest_ball = ball;
         slowest_energy = ball_energy;
       }
     }
+    if (slowest_ball < 0) return;
 
     double corrected_energy = slowest_energy + deficit_energy;
-    if (slowest_energy > KINETIC_ENERGY_TOLERANCE) {
-      double speed_scale = sqrt(corrected_energy / slowest_energy);
-      BALL_VX[slowest_ball] *= speed_scale;
-      BALL_VY[slowest_ball] *= speed_scale;
-    } else {
-      BALL_VX[slowest_ball] = sqrt(corrected_energy);
-      BALL_VY[slowest_ball] = 0.0;
-    }
+    double speed_scale = sqrt(corrected_energy / slowest_energy);
+    BALL_VX[slowest_ball] *= speed_scale;
+    BALL_VY[slowest_ball] *= speed_scale;
   }
 }
 

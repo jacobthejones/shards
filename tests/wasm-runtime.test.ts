@@ -292,17 +292,18 @@ test("overlapping balls separate and exchange their normal velocity", async () =
   assert.ok(Math.abs(totalBallKineticEnergy(wasm) - 2 * INITIAL_BALL_SPEED ** 2) < 1e-10);
 });
 
-test("overlapping stationary balls are separated while restoring target energy", async () => {
+test("an exact overlap preserves a zero-speed ball while restoring target energy", async () => {
   const wasm = await loadRuntime();
   wasm.initialize_real_simulation(7, 77, 2);
   wasm.set_all_shards_broken(1);
   wasm.set_ball_state(0, 0, 0, 0, 0, 0);
-  wasm.set_ball_state(1, 0, 0, 0, 0, 0);
+  wasm.set_ball_state(1, 0, 0, INITIAL_BALL_SPEED, 0, 0);
 
   wasm.step_real_simulation(1);
 
   const distance = Math.hypot(wasm.get_ball_x(0) - wasm.get_ball_x(1), wasm.get_ball_y(0) - wasm.get_ball_y(1));
   assert.ok(distance >= 2 * 0.095, "exactly overlapping balls should be separated");
+  assert.equal(Math.hypot(wasm.get_ball_vx(0), wasm.get_ball_vy(0)), 0);
   assert.ok(Math.abs(totalBallKineticEnergy(wasm) - 2 * INITIAL_BALL_SPEED ** 2) < 1e-10);
 });
 
@@ -326,6 +327,33 @@ test("missing kinetic energy is added to the slowest ball", async () => {
   const wasm = await loadRuntime();
   wasm.initialize_real_simulation(7, 77, 2);
   wasm.set_all_shards_broken(1);
+  wasm.set_ball_state(0, -5, 0, 0, 0, 0);
+  wasm.set_ball_state(1, 5, 0, 0, 0.5, 0);
+
+  wasm.step_real_simulation(1);
+
+  assert.equal(Math.hypot(wasm.get_ball_vx(0), wasm.get_ball_vy(0)), 0);
+  assert.equal(wasm.get_ball_vx(1), 0);
+  assert.ok(Math.abs(wasm.get_ball_vy(1) - Math.sqrt(2 * INITIAL_BALL_SPEED ** 2)) < 1e-10);
+  assert.ok(Math.abs(totalBallKineticEnergy(wasm) - 2 * INITIAL_BALL_SPEED ** 2) < 1e-10);
+});
+
+test("a fully stationary set of balls stays stationary", async () => {
+  const wasm = await loadRuntime();
+  wasm.initialize_real_simulation(7, 77, 2);
+  wasm.set_all_shards_broken(1);
+  wasm.set_ball_state(0, -5, 0, 0, 0, 0);
+  wasm.set_ball_state(1, 5, 0, 0, 0, 0);
+
+  wasm.step_real_simulation(1);
+
+  assert.equal(totalBallKineticEnergy(wasm), 0);
+});
+
+test("the slowest moving ball receives missing kinetic energy", async () => {
+  const wasm = await loadRuntime();
+  wasm.initialize_real_simulation(7, 77, 2);
+  wasm.set_all_shards_broken(1);
   wasm.set_ball_state(0, -5, 0, 1, 0, 0);
   wasm.set_ball_state(1, 5, 0, 0, 0.5, 0);
 
@@ -333,7 +361,6 @@ test("missing kinetic energy is added to the slowest ball", async () => {
 
   assert.equal(wasm.get_ball_vx(0), 1);
   assert.equal(wasm.get_ball_vy(0), 0);
-  assert.equal(wasm.get_ball_vx(1), 0);
   assert.ok(Math.abs(wasm.get_ball_vy(1) - Math.sqrt(2 * INITIAL_BALL_SPEED ** 2 - 1)) < 1e-10);
   assert.ok(Math.abs(totalBallKineticEnergy(wasm) - 2 * INITIAL_BALL_SPEED ** 2) < 1e-10);
 });
