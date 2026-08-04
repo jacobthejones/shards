@@ -21,6 +21,7 @@ import {
   getHud,
   keyFor,
   shardBreakFrequency,
+  shardCentroid,
   shardCollisionFrequency,
   shardPoints,
   type Arrow,
@@ -611,29 +612,23 @@ export default function Home() {
     };
 
     const drawSeed = (targetContext: ChunkContext, seed: Simulation["seeds"][number], shard: Shard) => {
-      const growth = Math.max(0, Math.min(1, seed.growth));
       const charge = Math.max(0, Math.min(1, seed.charge));
-      const path = shardPathFor(shard);
       const hue = 105 + shard.seed * 48;
-
-      if (growth > 0) {
-        targetContext.fillStyle = `hsla(${hue}, 34%, ${20 + shard.seed * 12}%, ${0.02 + growth * 0.08})`;
-        targetContext.fill(path);
-        targetContext.strokeStyle = `hsla(${hue}, 46%, 68%, ${growth * 0.38})`;
-        targetContext.lineWidth = 0.016;
-        targetContext.stroke(path);
-      }
-
-      if (charge <= 0) return;
-      targetContext.save();
-      targetContext.clip(path);
-      const glow = targetContext.createRadialGradient(shard.sx, shard.sy, 0, shard.sx, shard.sy, 0.52);
-      glow.addColorStop(0, `hsla(${hue + 20}, 70%, 78%, ${0.2 * charge})`);
-      glow.addColorStop(0.65, `hsla(${hue + 20}, 62%, 62%, ${0.06 * charge})`);
+      const [centerX, centerY] = shardCentroid(shard);
+      const completed = charge >= 1 - 0.000001;
+      const haloRadius = completed ? 0.28 : 0.1 + charge * 0.1;
+      const coreRadius = completed ? 0.062 : 0.022 + charge * 0.016;
+      const haloAlpha = completed ? 0.82 : 0.12 + charge * 0.42;
+      const glow = targetContext.createRadialGradient(centerX, centerY, 0, centerX, centerY, haloRadius);
+      glow.addColorStop(0, `hsla(${hue + 18}, 92%, ${completed ? 88 : 78}%, ${haloAlpha})`);
+      glow.addColorStop(0.18, `hsla(${hue + 10}, 82%, ${completed ? 72 : 62}%, ${completed ? 0.42 : 0.08 + charge * 0.16})`);
       glow.addColorStop(1, "rgba(0, 0, 0, 0)");
       targetContext.fillStyle = glow;
-      targetContext.fillRect(shard.sx - 0.6, shard.sy - 0.6, 1.2, 1.2);
-      targetContext.restore();
+      targetContext.fillRect(centerX - haloRadius, centerY - haloRadius, haloRadius * 2, haloRadius * 2);
+      targetContext.fillStyle = `hsla(${hue + 22}, 96%, ${completed ? 94 : 84}%, ${completed ? 1 : 0.42 + charge * 0.5})`;
+      targetContext.beginPath();
+      targetContext.arc(centerX, centerY, coreRadius, 0, TAU);
+      targetContext.fill();
     };
 
     const createChunkSurface = (): RenderChunkSurface => {

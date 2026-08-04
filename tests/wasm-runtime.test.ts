@@ -502,9 +502,10 @@ test("Germination spawns seeds on independent ball timers", async () => {
   wasm.set_ball_next_seed_at(0, 0.001);
   wasm.step_real_simulation(1);
   assert.equal(wasm.get_seed_count(), 1);
-  wasm.step_real_simulation(1);
-  assert.ok(wasm.get_seed_growth(0) > 0);
+  assert.equal(wasm.get_seed_growth(0), 1);
   assert.equal(wasm.get_seed_charge(0), 0);
+  wasm.step_real_simulation(1);
+  assert.ok(wasm.get_seed_charge(0) > 0);
   assert.ok(wasm.get_ball_next_seed_at(0) > wasm.get_time());
 
   wasm.set_score(300);
@@ -512,6 +513,17 @@ test("Germination spawns seeds on independent ball timers", async () => {
   wasm.set_ball_next_seed_at(1, wasm.get_time() + 0.001);
   wasm.step_real_simulation(1);
   assert.ok(wasm.get_ball_next_seed_at(1) > wasm.get_time());
+});
+
+test("legacy seed states become immediately chargeable", async () => {
+  const wasm = await loadRuntime();
+  wasm.initialize_real_simulation(7, 77, 1);
+  wasm.set_all_shards_broken(1);
+  wasm.set_seed_state(0, 0, 0.25, 0);
+
+  assert.equal(wasm.get_seed_growth(0), 1);
+  wasm.step_real_simulation(1);
+  assert.ok(wasm.get_seed_charge(0) > 0);
 });
 
 test("loading a save rebuilds render geometry for the saved field", async () => {

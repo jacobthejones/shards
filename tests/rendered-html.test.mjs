@@ -91,6 +91,9 @@ test("keeps the prototype self-contained", async () => {
   assert.match(page, /resonance-icon/);
   assert.match(page, /germination-icon/);
   assert.match(page, /drawSeed/);
+  assert.match(page, /shardCentroid/);
+  assert.match(page, /const completed = charge >= 1 - 0\.000001/);
+  assert.doesNotMatch(page, /targetContext\.clip\(path\)/);
   assert.match(page, /TECH_TREE_BRANCHES/);
   assert.doesNotMatch(page, /chosen-one|corrosive-wake|The Chosen One|Corrosive Wake/);
   assert.match(page, /drawBoundaryEdges/);
@@ -134,7 +137,7 @@ test("keeps the prototype self-contained", async () => {
   assert.match(worker, /case "load"/);
   assert.match(worker, /case "setTech"/);
   assert.match(wasmSimulation, /simulation\.wasm\?v=\$\{WASM_RUNTIME_VERSION\}/);
-  assert.match(wasmSimulation, /WASM_RUNTIME_VERSION = 18/);
+  assert.match(wasmSimulation, /WASM_RUNTIME_VERSION = 19/);
   assert.match(wasmSimulation, /contain_ball/);
   assert.match(wasmSimulation, /is_shard_boundary_edge/);
   assert.doesNotMatch(wasmSimulation, /set_tech_chosen_one|set_tech_corrosive_wake|get_corrosive_wake/);

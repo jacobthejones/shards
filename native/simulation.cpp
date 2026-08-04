@@ -44,9 +44,8 @@
 #define CONDUCTION_SPLASH_DAMAGE 0.05
 #define CHOSEN_ONE_DAMAGE_MULTIPLIER 5.0
 #define CHOSEN_BALL_INDEX 0
-#define SIMULATION_RUNTIME_VERSION 18
+#define SIMULATION_RUNTIME_VERSION 19
 #define SEED_SPAWN_MEAN_SECONDS 300.0
-#define SEED_GROWTH_RATE 0.01
 #define SEED_CHARGE_RATE 0.01
 #define SEED_LUMENS 10.0
 #define BOUNCE_JITTER_RADIANS (0.02 * 3.1415926535897932384626433832795 / 180.0)
@@ -519,7 +518,9 @@ static int32_t add_seed(int32_t shard) {
   if (shard < 0 || shard >= shard_count || !SHARD_BROKEN[shard] || seed_index_for_shard(shard) >= 0) return 0;
   if (seed_count >= MAX_SEEDS) return 0;
   SEED_SHARD[seed_count] = shard;
-  SEED_GROWTH[seed_count] = 0.0;
+  // Regeneration begins in the charging state; there is no separate growing
+  // phase before a cell can accumulate its lumen.
+  SEED_GROWTH[seed_count] = 1.0;
   SEED_CHARGE[seed_count] = 0.0;
   seed_count += 1;
   return 1;
@@ -527,11 +528,9 @@ static int32_t add_seed(int32_t shard) {
 
 static void refresh_seeds(void) {
   for (int32_t seed = 0; seed < seed_count; seed += 1) {
-    if (SEED_GROWTH[seed] < 1.0) {
-      SEED_GROWTH[seed] += SEED_GROWTH_RATE * FIXED_TIMESTEP;
-      if (SEED_GROWTH[seed] > 1.0) SEED_GROWTH[seed] = 1.0;
-      continue;
-    }
+    // Old saves may contain a seed from the retired growth phase. Promote it
+    // immediately so saved regenerations also begin charging on load.
+    SEED_GROWTH[seed] = 1.0;
     SEED_CHARGE[seed] += SEED_CHARGE_RATE * FIXED_TIMESTEP;
     if (SEED_CHARGE[seed] > 1.0) SEED_CHARGE[seed] = 1.0;
   }
@@ -1902,7 +1901,8 @@ __attribute__((export_name("set_seed_state"))) void set_seed_state(int32_t index
   if (index < 0 || index >= MAX_SEEDS || shard < 0 || shard >= shard_count || seed_index_for_shard(shard) >= 0) return;
   if (index >= seed_count) seed_count = index + 1;
   SEED_SHARD[index] = shard;
-  SEED_GROWTH[index] = growth < 0.0 ? 0.0 : growth > 1.0 ? 1.0 : growth;
+  (void)growth;
+  SEED_GROWTH[index] = 1.0;
   SEED_CHARGE[index] = charge < 0.0 ? 0.0 : charge > 1.0 ? 1.0 : charge;
 }
 __attribute__((export_name("set_ball_corrosive_wake_charge"))) void set_ball_corrosive_wake_charge(int32_t index, int32_t charged) {

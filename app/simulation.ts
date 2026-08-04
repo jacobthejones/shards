@@ -238,6 +238,23 @@ export const shardPoints = (shard: Shard): [number, number][] => {
   return buildVoronoiCell(shard.gx, shard.gy, shard.fieldSeed).points;
 };
 
+export const shardCentroid = (shard: Shard): [number, number] => {
+  const points = shardPoints(shard);
+  let doubledArea = 0;
+  let weightedX = 0;
+  let weightedY = 0;
+  for (let index = 0; index < points.length; index += 1) {
+    const [ax, ay] = points[index];
+    const [bx, by] = points[(index + 1) % points.length];
+    const cross = ax * by - bx * ay;
+    doubledArea += cross;
+    weightedX += (ax + bx) * cross;
+    weightedY += (ay + by) * cross;
+  }
+  if (Math.abs(doubledArea) < 1e-9) return [shard.sx, shard.sy];
+  return [weightedX / (3 * doubledArea), weightedY / (3 * doubledArea)];
+};
+
 export const shardArea = (shard: Shard) => {
   const points = shardPoints(shard);
   let doubledArea = 0;

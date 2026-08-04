@@ -12,6 +12,7 @@ import {
   renderChunkRangeForCellBounds,
   renderChunkSignature,
 } from "../app/render-cache";
+import { shardCentroid, type Shard } from "../app/simulation";
 
 const shard = (overrides: Partial<{
   key: string;
@@ -51,6 +52,30 @@ test("visible cell bounds map to every chunk they touch", () => {
     minY: -1,
     maxY: 1,
   });
+});
+
+test("seed glows can use the geometric midpoint of an irregular shard", () => {
+  const cell = {
+    key: "0:0",
+    gx: 0,
+    gy: 0,
+    sx: 99,
+    sy: 99,
+    points: [[0, 0], [4, 0], [3, 2], [0, 2]] as [number, number][],
+    health: 1,
+    maxHealth: 1,
+    healthUpdatedAt: 0,
+    growth: 0,
+    growing: false,
+    boundaryEdges: [],
+    impacts: [],
+    hue: 200,
+    seed: 0,
+    fieldSeed: 1,
+  } satisfies Shard;
+  const [x, y] = shardCentroid(cell);
+  assert.ok(Math.abs(x - 1.7619047619) < 1e-9);
+  assert.ok(Math.abs(y - 0.9523809524) < 1e-9);
 });
 
 test("render signatures change for visual state but ignore non-visual timestamps", () => {
