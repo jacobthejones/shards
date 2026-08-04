@@ -74,8 +74,8 @@ test("the shipped C++ runtime initializes a contiguous Voronoi field", async () 
   wasm.initialize_real_simulation(1234, 5678, 1);
 
   const shardCount = wasm.get_shard_count();
-  assert.ok(shardCount > 1000);
-  assert.ok(shardCount < 2500, "the field radius should be half of the original field");
+  assert.ok(shardCount > 5000);
+  assert.ok(shardCount < 8000, "the field radius should be doubled");
   assert.equal(wasm.get_ball_count(), 1);
   assert.ok(wasm.get_shard_point_count(0) >= 3);
   assert.ok(wasm.get_shard_point_count(shardCount - 1) >= 3);
@@ -85,7 +85,7 @@ test("the shipped C++ runtime initializes a contiguous Voronoi field", async () 
   assert.equal(wasm.get_simulation_runtime_version(), WASM_RUNTIME_VERSION);
 });
 
-test("initial and added balls spawn inside the reduced field boundary", async () => {
+test("initial and added balls spawn inside the expanded field boundary", async () => {
   const wasm = await loadRuntime();
   wasm.initialize_real_simulation(1234, 5678, 32);
   for (let ball = 0; ball < wasm.get_ball_count(); ball += 1) {
@@ -255,7 +255,7 @@ test("the permanent boundary contains many balls on a fully cleared field", asyn
   for (let interval = 0; interval < 60; interval += 1) {
     wasm.step_real_simulation(600);
     for (let ball = 0; ball < wasm.get_ball_count(); ball += 1) {
-      assert.ok(Math.hypot(wasm.get_ball_x(ball), wasm.get_ball_y(ball)) < 26);
+      assert.ok(Math.hypot(wasm.get_ball_x(ball), wasm.get_ball_y(ball)) < 52);
       assert.equal(boundaryContainsPoint(wasm, wasm.get_ball_x(ball), wasm.get_ball_y(ball)), true);
     }
   }
