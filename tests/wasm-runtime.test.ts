@@ -265,6 +265,36 @@ test("the C++ runtime preserves the fixed ball speed and upgrade cost", async ()
   assert.equal(wasm.add_ball(), 0);
 });
 
+test("overlapping balls separate and exchange their normal velocity", async () => {
+  const wasm = await loadRuntime();
+  wasm.initialize_real_simulation(7, 77, 2);
+  wasm.set_all_shards_broken(1);
+  wasm.set_ball_state(0, -0.1, 0, 1, 0, 0);
+  wasm.set_ball_state(1, 0.1, 0, -1, 0, 0);
+
+  wasm.step_real_simulation(1);
+
+  const distance = Math.hypot(wasm.get_ball_x(0) - wasm.get_ball_x(1), wasm.get_ball_y(0) - wasm.get_ball_y(1));
+  assert.ok(distance >= 2 * 0.095, "colliding balls should not remain overlapped");
+  assert.ok(wasm.get_ball_vx(0) < 0, "the first ball should bounce back");
+  assert.ok(wasm.get_ball_vx(1) > 0, "the second ball should bounce back");
+});
+
+test("overlapping stationary balls are separated without gaining speed", async () => {
+  const wasm = await loadRuntime();
+  wasm.initialize_real_simulation(7, 77, 2);
+  wasm.set_all_shards_broken(1);
+  wasm.set_ball_state(0, 0, 0, 0, 0, 0);
+  wasm.set_ball_state(1, 0, 0, 0, 0, 0);
+
+  wasm.step_real_simulation(1);
+
+  const distance = Math.hypot(wasm.get_ball_x(0) - wasm.get_ball_x(1), wasm.get_ball_y(0) - wasm.get_ball_y(1));
+  assert.ok(distance >= 2 * 0.095, "exactly overlapping balls should be separated");
+  assert.equal(Math.hypot(wasm.get_ball_vx(0), wasm.get_ball_vy(0)), 0);
+  assert.equal(Math.hypot(wasm.get_ball_vx(1), wasm.get_ball_vy(1)), 0);
+});
+
 test("Resonance and Conduction purchase, refund, and propagate damage", async () => {
   const wasm = await loadRuntime();
   wasm.initialize_real_simulation(7, 77, 1);

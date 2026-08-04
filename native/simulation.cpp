@@ -42,7 +42,7 @@
 #define CONDUCTION_SPLASH_DAMAGE 0.05
 #define CHOSEN_ONE_DAMAGE_MULTIPLIER 5.0
 #define CHOSEN_BALL_INDEX 0
-#define SIMULATION_RUNTIME_VERSION 11
+#define SIMULATION_RUNTIME_VERSION 12
 #define BOUNCE_JITTER_RADIANS (0.02 * 3.1415926535897932384626433832795 / 180.0)
 #define COLLISION_SEPARATION 0.004
 #define MAX_COLLISIONS_PER_STEP 4
@@ -1427,6 +1427,53 @@ static void process_growth_path(int32_t ball, double x, double y, double next_x,
   }
 }
 
+static void resolve_ball_collisions(void) {
+  const double minimum_distance = BASE_BALL_RADIUS * 2.0;
+  const double minimum_distance_squared = minimum_distance * minimum_distance;
+  for (int32_t first = 0; first < ball_count; first += 1) {
+    for (int32_t second = first + 1; second < ball_count; second += 1) {
+      double delta_x = BALL_X[first] - BALL_X[second];
+      double delta_y = BALL_Y[first] - BALL_Y[second];
+      double distance_squared = delta_x * delta_x + delta_y * delta_y;
+      if (distance_squared >= minimum_distance_squared) continue;
+
+      double distance = sqrt(distance_squared);
+      double normal_x;
+      double normal_y;
+      if (distance > 0.000001) {
+        normal_x = delta_x / distance;
+        normal_y = delta_y / distance;
+      } else {
+        double relative_velocity_x = BALL_VX[first] - BALL_VX[second];
+        double relative_velocity_y = BALL_VY[first] - BALL_VY[second];
+        double relative_speed = sqrt(relative_velocity_x * relative_velocity_x + relative_velocity_y * relative_velocity_y);
+        if (relative_speed > 0.000001) {
+          normal_x = relative_velocity_x / relative_speed;
+          normal_y = relative_velocity_y / relative_speed;
+        } else {
+          normal_x = 1.0;
+          normal_y = 0.0;
+        }
+      }
+
+      double relative_velocity = (BALL_VX[first] - BALL_VX[second]) * normal_x
+        + (BALL_VY[first] - BALL_VY[second]) * normal_y;
+      if (relative_velocity < 0.0) {
+        BALL_VX[first] -= relative_velocity * normal_x;
+        BALL_VY[first] -= relative_velocity * normal_y;
+        BALL_VX[second] += relative_velocity * normal_x;
+        BALL_VY[second] += relative_velocity * normal_y;
+      }
+
+      double correction = (minimum_distance - distance + COLLISION_SEPARATION) * 0.5;
+      BALL_X[first] += normal_x * correction;
+      BALL_Y[first] += normal_y * correction;
+      BALL_X[second] -= normal_x * correction;
+      BALL_Y[second] -= normal_y * correction;
+    }
+  }
+}
+
 static void step_simulation(void) {
   simulation_time += FIXED_TIMESTEP;
   recent_break_rate *= exp(-FIXED_TIMESTEP / RECENT_BREAK_RATE_TIME_CONSTANT_SECONDS);
@@ -1489,6 +1536,7 @@ static void step_simulation(void) {
       collision_count += 1;
     }
   }
+  resolve_ball_collisions();
   refresh_damaged_shards();
 }
 
