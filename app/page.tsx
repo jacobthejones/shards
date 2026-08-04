@@ -615,6 +615,8 @@ export default function Home() {
       const charge = Math.max(0, Math.min(1, seed.charge));
       const hue = 105 + shard.seed * 48;
       const [centerX, centerY] = shardCentroid(shard);
+      targetContext.fillStyle = `hsla(${hue}, 48%, 72%, 0.14)`;
+      targetContext.fill(shardPathFor(shard));
       const completed = charge >= 1 - 0.000001;
       const haloRadius = completed ? 0.28 : 0.1 + charge * 0.1;
       const coreRadius = completed ? 0.062 : 0.022 + charge * 0.016;
