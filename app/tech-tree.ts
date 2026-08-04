@@ -1,6 +1,7 @@
 export const TECH_IDS = {
   RESONANCE: "resonance",
   CONDUCTION: "conduction",
+  GERMINATION: "germination",
 } as const;
 
 // These IDs are kept only for save migrations. The branch they belonged to
@@ -14,6 +15,7 @@ export const REMOVED_TECH_IDS = {
 export type TechId = typeof TECH_IDS[keyof typeof TECH_IDS];
 
 export const RESONANCE_COST = 10_000;
+export const GERMINATION_COST = 5_000;
 export const CONDUCTION_COST = 50_000;
 export const REMOVED_TECH_REFUNDS: Record<string, number> = {
   [REMOVED_TECH_IDS.CHOSEN_ONE]: 10_000,
@@ -21,7 +23,7 @@ export const REMOVED_TECH_REFUNDS: Record<string, number> = {
   [REMOVED_TECH_IDS.NEW_GROWTH]: 50_000,
 };
 
-export type TechIcon = "resonance" | "conduction";
+export type TechIcon = "resonance" | "conduction" | "germination";
 
 export type TechDefinition = {
   id: TechId;
@@ -33,6 +35,14 @@ export type TechDefinition = {
 };
 
 export const TECH_TREE: TechDefinition[] = [
+  {
+    id: TECH_IDS.GERMINATION,
+    title: "Germination",
+    description: "Each ball occasionally plants a seed in the empty field. A mature seed slowly charges and returns 10 lumens whenever a ball passes through it.",
+    icon: "germination",
+    cost: GERMINATION_COST,
+    dependsOn: [],
+  },
   {
     id: TECH_IDS.CONDUCTION,
     title: "Conduction",
@@ -52,6 +62,7 @@ export const TECH_TREE: TechDefinition[] = [
 ];
 
 export const TECH_TREE_BRANCHES: TechId[][] = [
+  [TECH_IDS.GERMINATION],
   [TECH_IDS.CONDUCTION, TECH_IDS.RESONANCE],
 ];
 

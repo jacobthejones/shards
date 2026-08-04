@@ -39,6 +39,8 @@ const makeSimulation = (): Simulation => ({
   arrows: [{ id: 0, x: 1.2, y: -0.4, vx: 0.3, vy: -0.7, hue: 188, hitCooldown: 0.02 }],
   nextArrowId: 1,
   nextImpactId: 5,
+  seeds: [{ key: "0:0", growth: 0.4, charge: 0.7 }],
+  ballNextSeedAt: [123.4],
   unlockedTechs: [],
   score: 987,
   totalHits: 7,
@@ -70,17 +72,19 @@ test("a saved simulation includes its version and can be loaded", () => {
   assert.equal(loaded.shards[0]?.growth, 0.42);
   assert.equal(loaded.shards[0]?.growing, true);
   assert.equal(loaded.shards[0]?.impacts[0]?.id, 4);
+  assert.deepEqual(loaded.seeds, [{ key: "0:0", growth: 0.4, charge: 0.7 }]);
+  assert.deepEqual(loaded.ballNextSeedAt, [123.4]);
   assert.deepEqual(loaded.unlockedTechs, []);
 });
 
 test("a current save preserves active technologies without removed branch state", () => {
   const simulation = makeSimulation();
-  simulation.unlockedTechs = ["resonance", "conduction"];
+  simulation.unlockedTechs = ["germination", "resonance", "conduction"];
 
   const loaded = loadSaveState(serializeSaveState(saveStateForSimulation(simulation)));
 
   assert.ok(loaded);
-  assert.deepEqual(loaded.unlockedTechs, ["resonance", "conduction"]);
+  assert.deepEqual(loaded.unlockedTechs, ["germination", "resonance", "conduction"]);
   assert.equal(loaded.score, 987);
 });
 
@@ -92,7 +96,7 @@ test("removing the Chosen One branch refunds every purchased branch item", () =>
   const loaded = loadSaveState(JSON.stringify(legacySave));
 
   assert.ok(loaded);
-  assert.equal(loaded.version, SaveStateVersion.V4);
+  assert.equal(loaded.version, SaveStateVersion.V5);
   assert.equal(loaded.score, 60_987);
   assert.deepEqual(loaded.unlockedTechs, ["resonance", "conduction"]);
 });
@@ -105,7 +109,7 @@ test("the legacy New Growth alias is refunded as the removed branch upgrade", ()
   const loaded = loadSaveState(JSON.stringify(legacySave));
 
   assert.ok(loaded);
-  assert.equal(loaded.version, SaveStateVersion.V4);
+  assert.equal(loaded.version, SaveStateVersion.V5);
   assert.equal(loaded.score, 50_987);
   assert.deepEqual(loaded.unlockedTechs, []);
 });
@@ -134,7 +138,7 @@ test("a legacy V1 save loads without any unlocked technologies", () => {
 
   const loaded = loadSaveState(JSON.stringify(legacySave));
   assert.ok(loaded);
-  assert.equal(loaded.version, SaveStateVersion.V4);
+  assert.equal(loaded.version, SaveStateVersion.V5);
   assert.deepEqual(loaded.unlockedTechs, []);
   assert.equal(loaded.shards[0]?.growth, 0);
   assert.equal(loaded.shards[0]?.growing, false);
@@ -158,12 +162,12 @@ test("a legacy V2 save loads with growth defaults", () => {
 
   const loaded = loadSaveState(JSON.stringify(legacySave));
   assert.ok(loaded);
-  assert.equal(loaded.version, SaveStateVersion.V4);
+  assert.equal(loaded.version, SaveStateVersion.V5);
   assert.equal(loaded.shards[0]?.growth, 0);
   assert.equal(loaded.shards[0]?.growing, false);
 });
 
 test("the version enum exposes the current save version", () => {
   assert.ok(SAVE_STATE_VERSIONS.includes(CURRENT_SAVE_STATE_VERSION));
-  assert.equal(CURRENT_SAVE_STATE_VERSION, SaveStateVersion.V4);
+  assert.equal(CURRENT_SAVE_STATE_VERSION, SaveStateVersion.V5);
 });

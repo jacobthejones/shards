@@ -17,6 +17,7 @@
 #define MAX_FIELD_LAYOUT_ATTEMPTS 48
 #define MAX_IMPACTS 64
 #define MAX_BALLS 256
+#define MAX_SEEDS 16384
 #define MAX_EVENTS_PER_STEP 1024
 #define MAX_CORROSIVE_WAKE_SEGMENTS 512
 
@@ -33,6 +34,7 @@
 #define INITIAL_BALL_COST 300.0
 #define BALL_COST_GROWTH 1.2
 #define RESONANCE_COST 10000.0
+#define GERMINATION_COST 5000.0
 #define CONDUCTION_COST 50000.0
 #define CHOSEN_ONE_COST 10000.0
 #define CORROSIVE_WAKE_COST 50000.0
@@ -42,7 +44,11 @@
 #define CONDUCTION_SPLASH_DAMAGE 0.05
 #define CHOSEN_ONE_DAMAGE_MULTIPLIER 5.0
 #define CHOSEN_BALL_INDEX 0
-#define SIMULATION_RUNTIME_VERSION 15
+#define SIMULATION_RUNTIME_VERSION 16
+#define SEED_SPAWN_MEAN_SECONDS 120.0
+#define SEED_GROWTH_RATE 0.01
+#define SEED_CHARGE_RATE 0.01
+#define SEED_LUMENS 10.0
 #define BOUNCE_JITTER_RADIANS (0.02 * 3.1415926535897932384626433832795 / 180.0)
 #define COLLISION_SEPARATION 0.004
 #define KINETIC_ENERGY_TOLERANCE 0.000000000001
@@ -57,6 +63,7 @@ extern double sin(double);
 extern double cos(double);
 extern double sqrt(double);
 extern double exp(double);
+extern double log(double);
 extern double floor(double);
 extern double ceil(double);
 }
@@ -106,6 +113,12 @@ static double BALL_VX[MAX_BALLS];
 static double BALL_VY[MAX_BALLS];
 static double BALL_HIT_COOLDOWN[MAX_BALLS];
 static int32_t BALL_CORROSIVE_WAKE_CHARGED[MAX_BALLS];
+static double BALL_NEXT_SEED_AT[MAX_BALLS];
+
+static int32_t SEED_SHARD[MAX_SEEDS];
+static double SEED_GROWTH[MAX_SEEDS];
+static double SEED_CHARGE[MAX_SEEDS];
+static int32_t seed_count;
 
 static double CORROSIVE_WAKE_START_X[MAX_CORROSIVE_WAKE_SEGMENTS];
 static double CORROSIVE_WAKE_START_Y[MAX_CORROSIVE_WAKE_SEGMENTS];
@@ -131,6 +144,7 @@ static int32_t corrosive_wake_unlocked;
 static int32_t new_growth_unlocked;
 static int32_t resonance_unlocked;
 static int32_t conduction_unlocked;
+static int32_t germination_unlocked;
 static int32_t field_layout_variant;
 static int32_t event_count;
 static int32_t event_type[MAX_EVENTS_PER_STEP];
@@ -184,6 +198,39 @@ static void build_field_clip_boundary(double field_seed) {
 static double rng_next(void) {
   rng_state = rng_state * 1664525u + 1013904223u;
   return (double)rng_state / 4294967296.0;
+}
+
+static double next_seed_interval(void) {
+  double sample = rng_next();
+  if (sample < 0.000000001) sample = 0.000000001;
+  return -log(sample) * SEED_SPAWN_MEAN_SECONDS;
+}
+
+static void schedule_seed_timers(void) {
+  for (int32_t ball = 0; ball < ball_count; ball += 1) {
+    BALL_NEXT_SEED_AT[ball] = simulation_time + next_seed_interval();
+  }
+}
+
+static int32_t nearest_broken_shard_for_point(double x, double y) {
+  int32_t base_gx = (int32_t)floor(x + 0.5);
+  int32_t base_gy = (int32_t)floor(y + 0.5);
+  int32_t nearest = -1;
+  double nearest_distance = 1.7976931348623157e+308;
+  for (int32_t gy = base_gy - 5; gy <= base_gy + 5; gy += 1) {
+    for (int32_t gx = base_gx - 5; gx <= base_gx + 5; gx += 1) {
+      if (!in_grid(gx, gy)) continue;
+      int32_t shard = GRID[grid_index(gx, gy)];
+      if (shard < 0 || !SHARD_BROKEN[shard]) continue;
+      double dx = CENTER_X[shard] - x;
+      double dy = CENTER_Y[shard] - y;
+      double distance = dx * dx + dy * dy;
+      if (distance >= nearest_distance) continue;
+      nearest_distance = distance;
+      nearest = shard;
+    }
+  }
+  return nearest;
 }
 
 static void site_for(int32_t gx, int32_t gy, double field_seed, double *x, double *y) {
@@ -455,6 +502,60 @@ static int32_t segment_intersects_polygon(
     ) <= radius_squared) return 1;
   }
   return 0;
+}
+
+static int32_t seed_index_for_shard(int32_t shard) {
+  for (int32_t index = 0; index < seed_count; index += 1) {
+    if (SEED_SHARD[index] == shard) return index;
+  }
+  return -1;
+}
+
+static void clear_seeds(void) {
+  seed_count = 0;
+}
+
+static int32_t add_seed(int32_t shard) {
+  if (shard < 0 || shard >= shard_count || !SHARD_BROKEN[shard] || seed_index_for_shard(shard) >= 0) return 0;
+  if (seed_count >= MAX_SEEDS) return 0;
+  SEED_SHARD[seed_count] = shard;
+  SEED_GROWTH[seed_count] = 0.0;
+  SEED_CHARGE[seed_count] = 0.0;
+  seed_count += 1;
+  return 1;
+}
+
+static void refresh_seeds(void) {
+  for (int32_t seed = 0; seed < seed_count; seed += 1) {
+    if (SEED_GROWTH[seed] < 1.0) {
+      SEED_GROWTH[seed] += SEED_GROWTH_RATE * FIXED_TIMESTEP;
+      if (SEED_GROWTH[seed] > 1.0) SEED_GROWTH[seed] = 1.0;
+      continue;
+    }
+    SEED_CHARGE[seed] += SEED_CHARGE_RATE * FIXED_TIMESTEP;
+    if (SEED_CHARGE[seed] > 1.0) SEED_CHARGE[seed] = 1.0;
+  }
+}
+
+static void collect_seeds_on_segment(double x, double y, double next_x, double next_y) {
+  if (!germination_unlocked || seed_count == 0) return;
+  for (int32_t seed = 0; seed < seed_count; seed += 1) {
+    if (SEED_CHARGE[seed] < 1.0) continue;
+    if (!segment_intersects_polygon(x, y, next_x, next_y, BASE_BALL_RADIUS, SEED_SHARD[seed])) continue;
+    score += SEED_LUMENS;
+    SEED_CHARGE[seed] = 0.0;
+  }
+}
+
+static void spawn_seeds_due(void) {
+  if (!germination_unlocked) return;
+  for (int32_t ball = 0; ball < ball_count; ball += 1) {
+    if (BALL_NEXT_SEED_AT[ball] <= 0.0) BALL_NEXT_SEED_AT[ball] = simulation_time + next_seed_interval();
+    while (simulation_time >= BALL_NEXT_SEED_AT[ball]) {
+      add_seed(nearest_broken_shard_for_point(BALL_X[ball], BALL_Y[ball]));
+      BALL_NEXT_SEED_AT[ball] += next_seed_interval();
+    }
+  }
 }
 
 static void mark_shard_damaged(int32_t shard) {
@@ -1085,8 +1186,11 @@ static void initialize_balls(uint32_t seed, double field_seed_override, int32_t 
   new_growth_unlocked = 0;
   resonance_unlocked = 0;
   conduction_unlocked = 0;
+  germination_unlocked = 0;
   event_count = 0;
   corrosive_wake_segment_count = 0;
+  seed_count = 0;
+  for (int32_t index = 0; index < MAX_BALLS; index += 1) BALL_NEXT_SEED_AT[index] = 0.0;
 
   double initial_direction = rng_next() * TAU;
   BALL_X[0] = 0.0;
@@ -1095,6 +1199,7 @@ static void initialize_balls(uint32_t seed, double field_seed_override, int32_t 
   BALL_VY[0] = sin(initial_direction) * INITIAL_BALL_SPEED;
   BALL_HIT_COOLDOWN[0] = 0.0;
   BALL_CORROSIVE_WAKE_CHARGED[0] = 0;
+  BALL_NEXT_SEED_AT[0] = 0.0;
   ball_count = 1;
 
   while (ball_count < requested_balls && ball_count < MAX_BALLS) {
@@ -1110,6 +1215,7 @@ static void initialize_balls(uint32_t seed, double field_seed_override, int32_t 
     BALL_VY[current_count] = sin(direction) * INITIAL_BALL_SPEED;
     BALL_HIT_COOLDOWN[current_count] = 0.0;
     BALL_CORROSIVE_WAKE_CHARGED[current_count] = 0;
+    BALL_NEXT_SEED_AT[current_count] = 0.0;
     ball_count += 1;
   }
 }
@@ -1538,6 +1644,7 @@ static void step_simulation(void) {
   simulation_time += FIXED_TIMESTEP;
   recent_break_rate *= exp(-FIXED_TIMESTEP / RECENT_BREAK_RATE_TIME_CONSTANT_SECONDS);
   refresh_corrosive_wake();
+  refresh_seeds();
   event_count = 0;
   for (int32_t ball = 0; ball < ball_count; ball += 1) {
     BALL_HIT_COOLDOWN[ball] -= FIXED_TIMESTEP;
@@ -1547,6 +1654,7 @@ static void step_simulation(void) {
     while (remaining > 0.000001 && collision_count < MAX_COLLISIONS_PER_STEP) {
       double next_x = BALL_X[ball] + BALL_VX[ball] * remaining;
       double next_y = BALL_Y[ball] + BALL_VY[ball] * remaining;
+      collect_seeds_on_segment(BALL_X[ball], BALL_Y[ball], next_x, next_y);
       if (ball != CHOSEN_BALL_INDEX) {
         charge_ball_from_corrosive_wake(ball, BALL_X[ball], BALL_Y[ball], next_x, next_y);
       }
@@ -1598,6 +1706,7 @@ static void step_simulation(void) {
   }
   resolve_ball_collisions();
   preserve_total_ball_kinetic_energy();
+  spawn_seeds_due();
   refresh_damaged_shards();
 }
 
@@ -1659,6 +1768,7 @@ __attribute__((export_name("add_ball"))) int32_t add_ball(void) {
   BALL_VY[index] = sin(direction) * INITIAL_BALL_SPEED;
   BALL_HIT_COOLDOWN[index] = 0.0;
   BALL_CORROSIVE_WAKE_CHARGED[index] = 0;
+  BALL_NEXT_SEED_AT[index] = germination_unlocked ? simulation_time + next_seed_interval() : 0.0;
   ball_count += 1;
   return 1;
 }
@@ -1684,6 +1794,10 @@ __attribute__((export_name("set_tech_new_growth_state"))) void set_tech_new_grow
 
 __attribute__((export_name("set_tech_conduction_state"))) void set_tech_conduction_state(int32_t enabled) {
   conduction_unlocked = enabled && resonance_unlocked ? 1 : 0;
+}
+
+__attribute__((export_name("set_tech_germination_state"))) void set_tech_germination_state(int32_t enabled) {
+  germination_unlocked = enabled ? 1 : 0;
 }
 
 __attribute__((export_name("set_tech_chosen_one"))) int32_t set_tech_chosen_one(int32_t enabled) {
@@ -1744,6 +1858,23 @@ __attribute__((export_name("set_tech_conduction"))) int32_t set_tech_conduction(
   return 1;
 }
 
+__attribute__((export_name("set_tech_germination"))) int32_t set_tech_germination(int32_t enabled) {
+  if (enabled) {
+    if (germination_unlocked || score < GERMINATION_COST) return 0;
+    score -= GERMINATION_COST;
+    germination_unlocked = 1;
+    clear_seeds();
+    schedule_seed_timers();
+    return 1;
+  }
+  if (!germination_unlocked) return 0;
+  score += GERMINATION_COST;
+  germination_unlocked = 0;
+  clear_seeds();
+  for (int32_t ball = 0; ball < ball_count; ball += 1) BALL_NEXT_SEED_AT[ball] = 0.0;
+  return 1;
+}
+
 __attribute__((export_name("set_simulation_meta"))) void set_simulation_meta(double time, double next_score, int32_t hits, int32_t breaks, double break_rate) {
   simulation_time = time;
   score = next_score;
@@ -1759,6 +1890,18 @@ __attribute__((export_name("set_next_impact_id"))) void set_next_impact_id(int32
 __attribute__((export_name("set_ball_state"))) void set_ball_state(int32_t index, double x, double y, double vx, double vy, double cooldown) {
   if (index < 0 || index >= MAX_BALLS) return;
   BALL_X[index] = x; BALL_Y[index] = y; BALL_VX[index] = vx; BALL_VY[index] = vy; BALL_HIT_COOLDOWN[index] = cooldown;
+}
+__attribute__((export_name("set_ball_next_seed_at"))) void set_ball_next_seed_at(int32_t index, double next_time) {
+  if (index < 0 || index >= MAX_BALLS) return;
+  BALL_NEXT_SEED_AT[index] = next_time >= 0.0 ? next_time : 0.0;
+}
+__attribute__((export_name("clear_seeds"))) void clear_seed_state(void) { clear_seeds(); }
+__attribute__((export_name("set_seed_state"))) void set_seed_state(int32_t index, int32_t shard, double growth, double charge) {
+  if (index < 0 || index >= MAX_SEEDS || shard < 0 || shard >= shard_count || seed_index_for_shard(shard) >= 0) return;
+  if (index >= seed_count) seed_count = index + 1;
+  SEED_SHARD[index] = shard;
+  SEED_GROWTH[index] = growth < 0.0 ? 0.0 : growth > 1.0 ? 1.0 : growth;
+  SEED_CHARGE[index] = charge < 0.0 ? 0.0 : charge > 1.0 ? 1.0 : charge;
 }
 __attribute__((export_name("set_ball_corrosive_wake_charge"))) void set_ball_corrosive_wake_charge(int32_t index, int32_t charged) {
   if (index < 0 || index >= MAX_BALLS) return;
@@ -1815,6 +1958,7 @@ __attribute__((export_name("get_tech_corrosive_wake"))) int32_t get_tech_corrosi
 __attribute__((export_name("get_tech_new_growth"))) int32_t get_tech_new_growth(void) { return corrosive_wake_unlocked; }
 __attribute__((export_name("get_tech_resonance"))) int32_t get_tech_resonance(void) { return resonance_unlocked; }
 __attribute__((export_name("get_tech_conduction"))) int32_t get_tech_conduction(void) { return conduction_unlocked; }
+__attribute__((export_name("get_tech_germination"))) int32_t get_tech_germination(void) { return germination_unlocked; }
 __attribute__((export_name("get_total_hits"))) int32_t get_total_hits(void) { return total_hits; }
 __attribute__((export_name("get_total_breaks"))) int32_t get_total_breaks(void) { return total_breaks; }
 __attribute__((export_name("get_shard_count"))) int32_t get_shard_count(void) { return shard_count; }
@@ -1824,6 +1968,11 @@ __attribute__((export_name("get_next_impact_id"))) int32_t get_next_impact_id(vo
 __attribute__((export_name("get_time"))) double get_time(void) { return simulation_time; }
 __attribute__((export_name("get_recent_break_rate"))) double get_recent_break_rate(void) { return recent_break_rate; }
 __attribute__((export_name("get_ball_count"))) int32_t get_ball_count(void) { return ball_count; }
+__attribute__((export_name("get_ball_next_seed_at"))) double get_ball_next_seed_at(int32_t index) { return index >= 0 && index < ball_count ? BALL_NEXT_SEED_AT[index] : 0.0; }
+__attribute__((export_name("get_seed_count"))) int32_t get_seed_count(void) { return seed_count; }
+__attribute__((export_name("get_seed_shard"))) int32_t get_seed_shard(int32_t index) { return index >= 0 && index < seed_count ? SEED_SHARD[index] : -1; }
+__attribute__((export_name("get_seed_growth"))) double get_seed_growth(int32_t index) { return index >= 0 && index < seed_count ? SEED_GROWTH[index] : 0.0; }
+__attribute__((export_name("get_seed_charge"))) double get_seed_charge(int32_t index) { return index >= 0 && index < seed_count ? SEED_CHARGE[index] : 0.0; }
 __attribute__((export_name("get_event_count"))) int32_t get_event_count(void) { return event_count; }
 __attribute__((export_name("get_event_type"))) int32_t get_event_type(int32_t index) { return index >= 0 && index < event_count ? event_type[index] : 0; }
 __attribute__((export_name("get_event_shard"))) int32_t get_event_shard(int32_t index) { return index >= 0 && index < event_count ? event_shard[index] : -1; }

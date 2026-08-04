@@ -1,6 +1,7 @@
 import {
   type Arrow,
   type DynamicShardState,
+  type SeedState,
   type Simulation,
 } from "./simulation";
 import { REMOVED_TECH_REFUNDS, TECH_IDS, type TechId } from "./tech-tree";
@@ -10,9 +11,10 @@ export enum SaveStateVersion {
   V2 = 2,
   V3 = 3,
   V4 = 4,
+  V5 = 5,
 }
 
-export const CURRENT_SAVE_STATE_VERSION = SaveStateVersion.V4;
+export const CURRENT_SAVE_STATE_VERSION = SaveStateVersion.V5;
 export const SAVE_STATE_STORAGE_KEY = "shards.game.save";
 export const SAVE_STATE_INTERVAL_MS = 15_000;
 
@@ -49,7 +51,13 @@ export type SaveStateV4 = Omit<SaveStateV3, "version"> & {
   version: SaveStateVersion.V4;
 };
 
-export type SaveState = SaveStateV4;
+export type SaveStateV5 = Omit<SaveStateV4, "version"> & {
+  version: SaveStateVersion.V5;
+  seeds: SeedState[];
+  ballNextSeedAt: number[];
+};
+
+export type SaveState = SaveStateV5;
 export type SaveStateMigration = (value: unknown) => SaveState;
 
 export const SAVE_STATE_VERSIONS = Object.values(SaveStateVersion).filter(
@@ -87,6 +95,15 @@ const arrowValue = (value: unknown): Arrow => {
     vy: finiteNumber(value.vy, "arrow.vy"),
     hue: finiteNumber(value.hue, "arrow.hue"),
     hitCooldown: finiteNumber(value.hitCooldown, "arrow.hitCooldown"),
+  };
+};
+
+const seedValue = (value: unknown): SeedState => {
+  if (!isRecord(value)) throw new Error("Invalid save seed");
+  return {
+    key: stringValue(value.key, "seed.key"),
+    growth: finiteNumber(value.growth, "seed.growth"),
+    charge: finiteNumber(value.charge, "seed.charge"),
   };
 };
 
@@ -133,7 +150,7 @@ const migrateV1 = (value: unknown): SaveState => {
   }
 
   return {
-    version: SaveStateVersion.V4,
+    version: SaveStateVersion.V5,
     savedAt: finiteNumber(value.savedAt, "savedAt"),
     fieldSeed: finiteNumber(value.fieldSeed, "fieldSeed"),
     randomState: finiteNumber(value.randomState, "randomState"),
@@ -150,6 +167,8 @@ const migrateV1 = (value: unknown): SaveState => {
     broken: value.broken.map((key) => stringValue(key, "broken key")),
     shards: value.shards.map((shard) => dynamicShardValue(shard, false)),
     unlockedTechs: [],
+    seeds: [],
+    ballNextSeedAt: [],
   };
 };
 
@@ -159,7 +178,7 @@ const migrateV2 = (value: unknown): SaveState => {
   const techState = migrateTechState(value.unlockedTechs);
   return {
     ...migrated,
-    version: SaveStateVersion.V4,
+    version: SaveStateVersion.V5,
     score: migrated.score + techState.refund,
     unlockedTechs: techState.unlockedTechs,
   };
@@ -173,20 +192,38 @@ const migrateV3 = (value: unknown): SaveState => {
   const techState = migrateTechState(value.unlockedTechs);
   return {
     ...migrated,
-    version: SaveStateVersion.V4,
+    version: SaveStateVersion.V5,
     score: migrated.score + techState.refund,
     unlockedTechs: techState.unlockedTechs,
     shards: value.shards.map((shard) => dynamicShardValue(shard, true)),
   };
 };
 
-const migrateV4 = (value: unknown): SaveState => migrateV3(value);
+const migrateV4 = (value: unknown): SaveState => ({
+  ...migrateV3(value),
+  version: SaveStateVersion.V5,
+  seeds: [],
+  ballNextSeedAt: [],
+});
+
+const migrateV5 = (value: unknown): SaveState => {
+  if (!isRecord(value) || !Array.isArray(value.seeds) || !Array.isArray(value.ballNextSeedAt)) {
+    throw new Error("Invalid save seed fields");
+  }
+  return {
+    ...migrateV4(value),
+    version: SaveStateVersion.V5,
+    seeds: value.seeds.map(seedValue),
+    ballNextSeedAt: value.ballNextSeedAt.map((nextTime) => finiteNumber(nextTime, "ballNextSeedAt")),
+  };
+};
 
 export const SAVE_STATE_MIGRATIONS: Record<SaveStateVersion, SaveStateMigration> = {
   [SaveStateVersion.V1]: migrateV1,
   [SaveStateVersion.V2]: migrateV2,
   [SaveStateVersion.V3]: migrateV3,
   [SaveStateVersion.V4]: migrateV4,
+  [SaveStateVersion.V5]: migrateV5,
 };
 
 const isSaveStateVersion = (value: unknown): value is SaveStateVersion => {
@@ -233,6 +270,8 @@ export const saveStateForSimulation = (sim: Simulation): SaveState => {
     awaitingStart: sim.awaitingStart,
     nextArrowId: sim.nextArrowId,
     nextImpactId: sim.nextImpactId,
+    seeds: sim.seeds.map((seed) => ({ ...seed })),
+    ballNextSeedAt: [...sim.ballNextSeedAt],
     unlockedTechs: [...sim.unlockedTechs],
     arrows: sim.arrows.map((arrow) => ({ ...arrow })),
     broken: [...sim.broken],

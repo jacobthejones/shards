@@ -41,7 +41,6 @@ import {
   type SaveState,
 } from "./save-state";
 import {
-  TECH_IDS,
   TECH_TREE,
   TECH_TREE_BRANCHES,
   techHasUnlockedDependents,
@@ -215,6 +214,14 @@ const ConductionIcon = () => (
   </svg>
 );
 
+const GerminationIcon = () => (
+  <svg className="germination-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+    <path d="M12 21V12M12 14.5L8.25 11.75M12 14.5L15.75 11.75M8.25 11.75L7.8 8.2M15.75 11.75L16.2 8.2M7.8 8.2L8.15 4.5M16.2 8.2L15.85 4.5" />
+    <circle cx="8.15" cy="4.5" r="1.2" fill="currentColor" stroke="none" />
+    <circle cx="15.85" cy="4.5" r="1.2" fill="currentColor" stroke="none" />
+  </svg>
+);
+
 const createRenderSimulation = (): Simulation => ({
   shards: new Map(),
   broken: new Set(),
@@ -222,6 +229,8 @@ const createRenderSimulation = (): Simulation => ({
   arrows: [],
   nextArrowId: 1,
   nextImpactId: 1,
+  seeds: [],
+  ballNextSeedAt: [],
   unlockedTechs: [],
   score: STARTING_LUMENS,
   totalHits: 0,
@@ -600,6 +609,32 @@ export default function Home() {
       targetContext.stroke(shardPathFor(shard));
     };
 
+    const drawSeed = (targetContext: ChunkContext, seed: Simulation["seeds"][number], shard: Shard) => {
+      const growth = Math.max(0, Math.min(1, seed.growth));
+      const charge = Math.max(0, Math.min(1, seed.charge));
+      const path = shardPathFor(shard);
+      const hue = 105 + shard.seed * 48;
+
+      if (growth > 0) {
+        targetContext.fillStyle = `hsla(${hue}, 34%, ${20 + shard.seed * 12}%, ${0.06 + growth * 0.34})`;
+        targetContext.fill(path);
+        targetContext.strokeStyle = `hsla(${hue}, 46%, 68%, ${growth * 0.78})`;
+        targetContext.lineWidth = 0.016;
+        targetContext.stroke(path);
+      }
+
+      if (charge <= 0) return;
+      targetContext.save();
+      targetContext.clip(path);
+      const glow = targetContext.createRadialGradient(shard.sx, shard.sy, 0, shard.sx, shard.sy, 0.52);
+      glow.addColorStop(0, `hsla(${hue + 20}, 70%, 78%, ${0.2 * charge})`);
+      glow.addColorStop(0.65, `hsla(${hue + 20}, 62%, 62%, ${0.06 * charge})`);
+      glow.addColorStop(1, "rgba(0, 0, 0, 0)");
+      targetContext.fillStyle = glow;
+      targetContext.fillRect(shard.sx - 0.6, shard.sy - 0.6, 1.2, 1.2);
+      targetContext.restore();
+    };
+
     const createChunkSurface = (): RenderChunkSurface => {
       const pixelSize = Math.ceil((RENDER_CHUNK_SIZE + RENDER_CHUNK_PADDING * 2) * chunkRasterScale);
       const chunkCanvas: ChunkCanvas = typeof OffscreenCanvas === "undefined"
@@ -622,7 +657,16 @@ export default function Home() {
         }
       }
       if (shards.length === 0) return null;
-      const signature = `${sim.fieldSeed}`;
+      const seeds = sim.seeds
+        .filter((seed) => {
+          const shard = sim.shards.get(seed.key);
+          return shard && shard.gx >= origin.x - RENDER_CHUNK_PADDING
+            && shard.gx < origin.x + RENDER_CHUNK_SIZE + RENDER_CHUNK_PADDING
+            && shard.gy >= origin.y - RENDER_CHUNK_PADDING
+            && shard.gy < origin.y + RENDER_CHUNK_SIZE + RENDER_CHUNK_PADDING;
+        })
+        .sort((left, right) => left.key.localeCompare(right.key));
+      const signature = `${sim.fieldSeed}|${seeds.map((seed) => `${seed.key}:${Math.round(seed.growth * 100)}:${Math.round(seed.charge * 100)}`).join("|")}`;
       const surface = chunkCache.getOrCreate(
         key,
         signature,
@@ -651,8 +695,12 @@ export default function Home() {
             } else {
               drawShard(chunk.context, shard);
             }
-            drawBoundaryEdges(chunk.context, shard);
           });
+          seeds.forEach((seed) => {
+            const shard = sim.shards.get(seed.key);
+            if (shard && sim.broken.has(shard.key)) drawSeed(chunk.context, seed, shard);
+          });
+          shards.forEach((shard) => drawBoundaryEdges(chunk.context, shard));
         },
       );
       return { surface, origin };
@@ -855,6 +903,8 @@ export default function Home() {
       sim.awaitingStart = state.awaitingStart;
       sim.nextArrowId = state.nextArrowId;
       sim.nextImpactId = state.nextImpactId;
+      sim.seeds = state.seeds.map((seed) => ({ ...seed }));
+      sim.ballNextSeedAt = [...state.ballNextSeedAt];
       sim.unlockedTechs = [...nextUnlockedTechs];
       if (fieldChanged || (state.time === 0 && state.awaitingStart)) {
         cachedBounds = null;
@@ -1090,6 +1140,7 @@ export default function Home() {
                         >
                           {tech.icon === "resonance" && <ResonanceIcon />}
                           {tech.icon === "conduction" && <ConductionIcon />}
+                          {tech.icon === "germination" && <GerminationIcon />}
                         </button>
                       </div>
                     );

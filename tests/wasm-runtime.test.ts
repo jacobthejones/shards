@@ -26,6 +26,7 @@ const loadRuntime = async () => {
       exp: Math.exp,
       floor: Math.floor,
       ceil: Math.ceil,
+      log: Math.log,
     },
   });
   return instance.exports as Record<string, (...args: number[]) => number>;
@@ -445,6 +446,67 @@ test("combined Resonance and Conduction keep the ball moving and link propagatio
   assert.ok(movedSteps > 500);
   assert.ok(propagationEvents > 0);
   assert.ok(Math.abs(wasm.get_time() - 10) < 1e-12);
+});
+
+test("Germination costs 5,000 lumens and refunds cleanly", async () => {
+  const wasm = await loadRuntime();
+  wasm.initialize_real_simulation(7, 77, 1);
+  wasm.set_score(4_999);
+  assert.equal(wasm.set_tech_germination(1), 0);
+  wasm.set_score(5_000);
+  assert.equal(wasm.set_tech_germination(1), 1);
+  assert.equal(wasm.get_tech_germination(), 1);
+  assert.equal(wasm.get_score(), 0);
+  assert.equal(wasm.set_tech_germination(0), 1);
+  assert.equal(wasm.get_tech_germination(), 0);
+  assert.equal(wasm.get_score(), 5_000);
+});
+
+test("mature seeds pay 10 lumens and recharge in place", async () => {
+  const wasm = await loadRuntime();
+  wasm.initialize_real_simulation(7, 77, 1);
+  wasm.set_all_shards_broken(1);
+  wasm.set_tech_germination_state(1);
+
+  const shard = 0;
+  const x = wasm.get_shard_sx(shard);
+  const y = wasm.get_shard_sy(shard);
+  wasm.set_seed_state(0, shard, 1, 1);
+  wasm.set_ball_next_seed_at(0, 1_000_000);
+  wasm.set_ball_state(0, x - 0.3, y, 0.6, 0, 0);
+  wasm.set_score(0);
+  wasm.step_real_simulation(1);
+  assert.equal(wasm.get_seed_count(), 1);
+  assert.equal(wasm.get_score(), 10);
+  assert.equal(wasm.get_seed_charge(0), 0);
+
+  wasm.step_real_simulation(60 * 100);
+  assert.ok(Math.abs(wasm.get_seed_charge(0) - 1) < 1e-10);
+  wasm.set_ball_state(0, x - 0.3, y, 0.6, 0, 0);
+  wasm.step_real_simulation(1);
+  assert.equal(wasm.get_score(), 20);
+  assert.equal(wasm.get_seed_count(), 1);
+  assert.equal(wasm.get_seed_charge(0), 0);
+});
+
+test("Germination spawns seeds on independent ball timers", async () => {
+  const wasm = await loadRuntime();
+  wasm.initialize_real_simulation(7, 77, 1);
+  wasm.set_all_shards_broken(1);
+  wasm.set_tech_germination_state(1);
+  wasm.set_ball_next_seed_at(0, 0.001);
+  wasm.step_real_simulation(1);
+  assert.equal(wasm.get_seed_count(), 1);
+  wasm.step_real_simulation(1);
+  assert.ok(wasm.get_seed_growth(0) > 0);
+  assert.equal(wasm.get_seed_charge(0), 0);
+  assert.ok(wasm.get_ball_next_seed_at(0) > wasm.get_time());
+
+  wasm.set_score(300);
+  assert.equal(wasm.add_ball(), 1);
+  wasm.set_ball_next_seed_at(1, wasm.get_time() + 0.001);
+  wasm.step_real_simulation(1);
+  assert.ok(wasm.get_ball_next_seed_at(1) > wasm.get_time());
 });
 
 test("the C++ runtime emits collision events and advances simulation time", async () => {

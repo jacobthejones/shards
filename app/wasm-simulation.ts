@@ -3,6 +3,7 @@ import {
   type Arrow,
   type DynamicShardState,
   keyFor,
+  type SeedState,
   type SimulationEvent,
   type StaticShardState,
   type WorkerSimulationState,
@@ -10,7 +11,7 @@ import {
 import type { SaveState } from "./save-state";
 import { TECH_IDS, type TechId } from "./tech-tree";
 
-export const WASM_RUNTIME_VERSION = 15;
+export const WASM_RUNTIME_VERSION = 16;
 
 type WasmExports = {
   initialize_real_simulation: (seed: number, fieldSeed: number, balls: number) => void;
@@ -22,11 +23,16 @@ type WasmExports = {
   set_tech_conduction: (enabled: number) => number;
   set_tech_conduction_state: (enabled: number) => void;
   get_tech_conduction: () => number;
+  set_tech_germination: (enabled: number) => number;
+  set_tech_germination_state: (enabled: number) => void;
+  get_tech_germination: () => number;
   set_score: (score: number) => void;
   set_simulation_meta: (time: number, score: number, hits: number, breaks: number, rate: number) => void;
   set_random_state: (state: number) => void;
   set_next_impact_id: (id: number) => void;
   set_ball_state: (index: number, x: number, y: number, vx: number, vy: number, cooldown: number) => void;
+  set_ball_next_seed_at: (index: number, nextTime: number) => void;
+  get_ball_next_seed_at: (index: number) => number;
   contain_ball: (index: number) => void;
   set_all_shards_broken: (broken: number) => void;
   set_shard_broken: (shard: number, broken: number) => void;
@@ -34,6 +40,12 @@ type WasmExports = {
   set_shard_health: (shard: number, health: number, updatedAt: number) => void;
   clear_shard_impacts: (shard: number) => void;
   set_shard_impact: (shard: number, impact: number, id: number, x: number, y: number, inwardX: number, inwardY: number, strength: number) => void;
+  clear_seeds: () => void;
+  set_seed_state: (index: number, shard: number, growth: number, charge: number) => void;
+  get_seed_count: () => number;
+  get_seed_shard: (index: number) => number;
+  get_seed_growth: (index: number) => number;
+  get_seed_charge: (index: number) => number;
   get_field_seed: () => number;
   get_random_state: () => number;
   get_next_impact_id: () => number;
@@ -96,6 +108,7 @@ export class WasmSimulation {
         exp: Math.exp,
         floor: Math.floor,
         ceil: Math.ceil,
+        log: Math.log,
       },
     });
     const wasm = instance.exports as unknown as Partial<WasmExports>;
@@ -121,6 +134,7 @@ export class WasmSimulation {
   private nextArrowId = 1;
   private resonanceUnlocked = false;
   private conductionUnlocked = false;
+  private germinationUnlocked = false;
 
   private initializeMeta(ballCount: number) {
     this.arrowMeta = Array.from({ length: ballCount }, (_, index) => ({
@@ -130,6 +144,7 @@ export class WasmSimulation {
     this.nextArrowId = ballCount;
     this.resonanceUnlocked = false;
     this.conductionUnlocked = false;
+    this.germinationUnlocked = false;
     this.damagedShardIndices.clear();
     this.dirtyBrokenShardIndices.clear();
     this.brokenShardIndices.clear();
@@ -226,6 +241,17 @@ export class WasmSimulation {
     return states;
   }
 
+  private readSeeds(): SeedState[] {
+    return Array.from({ length: this.wasm.get_seed_count() }, (_, index) => {
+      const shardIndex = this.wasm.get_seed_shard(index);
+      return {
+        key: this.staticShards[shardIndex]?.key ?? "",
+        growth: this.wasm.get_seed_growth(index),
+        charge: this.wasm.get_seed_charge(index),
+      };
+    }).filter((seed) => seed.key.length > 0);
+  }
+
   private state(): WorkerSimulationState {
     return {
       fieldSeed: this.wasm.get_field_seed(),
@@ -239,9 +265,12 @@ export class WasmSimulation {
       awaitingStart: this.awaitingStart,
       nextArrowId: this.nextArrowId,
       nextImpactId: this.wasm.get_next_impact_id(),
+      seeds: this.readSeeds(),
+      ballNextSeedAt: Array.from({ length: this.wasm.get_ball_count() }, (_, index) => this.wasm.get_ball_next_seed_at(index)),
       unlockedTechs: [
         ...(this.resonanceUnlocked ? [TECH_IDS.RESONANCE] : []),
         ...(this.conductionUnlocked ? [TECH_IDS.CONDUCTION] : []),
+        ...(this.germinationUnlocked ? [TECH_IDS.GERMINATION] : []),
       ],
       arrows: this.readArrows(),
       broken: [...this.brokenShardIndices].map((index) => this.staticShards[index].key),
@@ -256,8 +285,10 @@ export class WasmSimulation {
     this.initializeMeta(1);
     this.wasm.set_tech_resonance_state(0);
     this.wasm.set_tech_conduction_state(0);
+    this.wasm.set_tech_germination_state(0);
     this.resonanceUnlocked = false;
     this.conductionUnlocked = false;
+    this.germinationUnlocked = false;
     this.paused = true;
     this.awaitingStart = true;
     this.readStaticShards();
@@ -272,9 +303,10 @@ export class WasmSimulation {
     this.wasm.set_next_impact_id(save.nextImpactId);
     this.resonanceUnlocked = save.unlockedTechs.includes(TECH_IDS.RESONANCE);
     this.conductionUnlocked = this.resonanceUnlocked && save.unlockedTechs.includes(TECH_IDS.CONDUCTION);
+    this.germinationUnlocked = save.unlockedTechs.includes(TECH_IDS.GERMINATION);
     this.wasm.set_tech_resonance_state(this.resonanceUnlocked ? 1 : 0);
     this.wasm.set_tech_conduction_state(this.conductionUnlocked ? 1 : 0);
-    this.readStaticShards();
+    this.wasm.set_tech_germination_state(this.germinationUnlocked ? 1 : 0);
     this.wasm.set_all_shards_broken(0);
     this.brokenShardIndices.clear();
     save.broken.forEach((key) => {
@@ -288,6 +320,15 @@ export class WasmSimulation {
       this.wasm.set_ball_state(index, arrow.x, arrow.y, arrow.vx, arrow.vy, arrow.hitCooldown);
       this.wasm.contain_ball(index);
     });
+    this.wasm.clear_seeds();
+    let loadedSeedIndex = 0;
+    save.seeds.forEach((seed) => {
+      const shardIndex = this.shardIndexByKey.get(seed.key);
+      if (shardIndex === undefined || !this.brokenShardIndices.has(shardIndex)) return;
+      this.wasm.set_seed_state(loadedSeedIndex, shardIndex, seed.growth, seed.charge);
+      loadedSeedIndex += 1;
+    });
+    save.ballNextSeedAt.forEach((nextTime, index) => this.wasm.set_ball_next_seed_at(index, nextTime));
     save.shards.forEach((savedShard) => {
       const index = this.shardIndexByKey.get(savedShard.key);
       if (index === undefined) return;
@@ -333,6 +374,11 @@ export class WasmSimulation {
     if (tech === TECH_IDS.CONDUCTION) {
       const changed = this.wasm.set_tech_conduction(enabled ? 1 : 0) !== 0;
       if (changed) this.conductionUnlocked = enabled;
+      return changed;
+    }
+    if (tech === TECH_IDS.GERMINATION) {
+      const changed = this.wasm.set_tech_germination(enabled ? 1 : 0) !== 0;
+      if (changed) this.germinationUnlocked = enabled;
       return changed;
     }
     return false;

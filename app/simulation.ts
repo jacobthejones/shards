@@ -36,6 +36,8 @@ export type Simulation = {
   arrows: Arrow[];
   nextArrowId: number;
   nextImpactId: number;
+  seeds: SeedState[];
+  ballNextSeedAt: number[];
   unlockedTechs: string[];
   score: number;
   totalHits: number;
@@ -65,6 +67,12 @@ export type Arrow = {
   vy: number;
   hue: number;
   hitCooldown: number;
+};
+
+export type SeedState = {
+  key: string;
+  growth: number;
+  charge: number;
 };
 
 export type SimulationHud = {
@@ -100,6 +108,8 @@ export type WorkerSimulationState = {
   awaitingStart: boolean;
   nextArrowId: number;
   nextImpactId: number;
+  seeds: SeedState[];
+  ballNextSeedAt: number[];
   unlockedTechs: string[];
   arrows: Arrow[];
   broken: string[];
@@ -121,7 +131,7 @@ export type SimulationWorkerCommand =
   | { type: "togglePause" }
   | { type: "reset" }
   | { type: "addBall" }
-  | { type: "setTech"; tech: "resonance" | "conduction"; enabled: boolean }
+  | { type: "setTech"; tech: "resonance" | "conduction" | "germination"; enabled: boolean }
   | { type: "setBallCount"; count: number }
   | { type: "load"; save: import("./save-state").SaveState };
 
