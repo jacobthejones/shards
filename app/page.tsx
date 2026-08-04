@@ -616,9 +616,9 @@ export default function Home() {
       const hue = 105 + shard.seed * 48;
 
       if (growth > 0) {
-        targetContext.fillStyle = `hsla(${hue}, 34%, ${20 + shard.seed * 12}%, ${0.06 + growth * 0.34})`;
+        targetContext.fillStyle = `hsla(${hue}, 34%, ${20 + shard.seed * 12}%, ${0.02 + growth * 0.08})`;
         targetContext.fill(path);
-        targetContext.strokeStyle = `hsla(${hue}, 46%, 68%, ${growth * 0.78})`;
+        targetContext.strokeStyle = `hsla(${hue}, 46%, 68%, ${growth * 0.38})`;
         targetContext.lineWidth = 0.016;
         targetContext.stroke(path);
       }
