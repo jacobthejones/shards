@@ -4,6 +4,17 @@ import test from "node:test";
 import { WASM_RUNTIME_VERSION } from "../app/wasm-simulation";
 
 const wasmPath = new URL("../public/simulation.wasm", import.meta.url);
+const INITIAL_BALL_SPEED = 1.4366976021418008;
+
+const totalBallKineticEnergy = (wasm: Record<string, (...args: number[]) => number>) => {
+  let energy = 0;
+  for (let ball = 0; ball < wasm.get_ball_count(); ball += 1) {
+    const vx = wasm.get_ball_vx(ball);
+    const vy = wasm.get_ball_vy(ball);
+    energy += vx * vx + vy * vy;
+  }
+  return energy;
+};
 
 const loadRuntime = async () => {
   const bytes = await readFile(wasmPath);
@@ -278,9 +289,10 @@ test("overlapping balls separate and exchange their normal velocity", async () =
   assert.ok(distance >= 2 * 0.095, "colliding balls should not remain overlapped");
   assert.ok(wasm.get_ball_vx(0) < 0, "the first ball should bounce back");
   assert.ok(wasm.get_ball_vx(1) > 0, "the second ball should bounce back");
+  assert.ok(Math.abs(totalBallKineticEnergy(wasm) - 2 * INITIAL_BALL_SPEED ** 2) < 1e-10);
 });
 
-test("overlapping stationary balls are separated without gaining speed", async () => {
+test("overlapping stationary balls are separated while restoring target energy", async () => {
   const wasm = await loadRuntime();
   wasm.initialize_real_simulation(7, 77, 2);
   wasm.set_all_shards_broken(1);
@@ -291,8 +303,39 @@ test("overlapping stationary balls are separated without gaining speed", async (
 
   const distance = Math.hypot(wasm.get_ball_x(0) - wasm.get_ball_x(1), wasm.get_ball_y(0) - wasm.get_ball_y(1));
   assert.ok(distance >= 2 * 0.095, "exactly overlapping balls should be separated");
-  assert.equal(Math.hypot(wasm.get_ball_vx(0), wasm.get_ball_vy(0)), 0);
-  assert.equal(Math.hypot(wasm.get_ball_vx(1), wasm.get_ball_vy(1)), 0);
+  assert.ok(Math.abs(totalBallKineticEnergy(wasm) - 2 * INITIAL_BALL_SPEED ** 2) < 1e-10);
+});
+
+test("excess kinetic energy is removed from the fastest ball", async () => {
+  const wasm = await loadRuntime();
+  wasm.initialize_real_simulation(7, 77, 2);
+  wasm.set_all_shards_broken(1);
+  wasm.set_ball_state(0, -5, 0, 2, 0, 0);
+  wasm.set_ball_state(1, 5, 0, 0, 0.5, 0);
+
+  wasm.step_real_simulation(1);
+
+  assert.ok(Math.abs(wasm.get_ball_vx(0) - Math.sqrt(2 * INITIAL_BALL_SPEED ** 2 - 0.5 ** 2)) < 1e-10);
+  assert.equal(wasm.get_ball_vy(0), 0);
+  assert.equal(wasm.get_ball_vx(1), 0);
+  assert.equal(wasm.get_ball_vy(1), 0.5);
+  assert.ok(Math.abs(totalBallKineticEnergy(wasm) - 2 * INITIAL_BALL_SPEED ** 2) < 1e-10);
+});
+
+test("missing kinetic energy is added to the slowest ball", async () => {
+  const wasm = await loadRuntime();
+  wasm.initialize_real_simulation(7, 77, 2);
+  wasm.set_all_shards_broken(1);
+  wasm.set_ball_state(0, -5, 0, 1, 0, 0);
+  wasm.set_ball_state(1, 5, 0, 0, 0.5, 0);
+
+  wasm.step_real_simulation(1);
+
+  assert.equal(wasm.get_ball_vx(0), 1);
+  assert.equal(wasm.get_ball_vy(0), 0);
+  assert.equal(wasm.get_ball_vx(1), 0);
+  assert.ok(Math.abs(wasm.get_ball_vy(1) - Math.sqrt(2 * INITIAL_BALL_SPEED ** 2 - 1)) < 1e-10);
+  assert.ok(Math.abs(totalBallKineticEnergy(wasm) - 2 * INITIAL_BALL_SPEED ** 2) < 1e-10);
 });
 
 test("Resonance and Conduction purchase, refund, and propagate damage", async () => {
