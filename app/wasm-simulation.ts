@@ -297,6 +297,9 @@ export class WasmSimulation {
   load(save: SaveState): void {
     this.wasm.initialize_real_simulation(1, save.fieldSeed, Math.max(1, save.arrows.length));
     this.initializeMeta(save.arrows.length);
+    // initialize_real_simulation regenerates the native geometry. Refresh the
+    // render-side geometry and key-to-index map before applying saved shards.
+    this.readStaticShards();
     this.nextArrowId = save.nextArrowId;
     this.wasm.set_simulation_meta(save.time, save.score, save.totalHits, save.totalBreaks, save.recentBreakRate);
     this.wasm.set_random_state(save.randomState);
@@ -351,6 +354,10 @@ export class WasmSimulation {
       ));
       this.damagedShardIndices.add(index);
     });
+    this.brokenShardIndices.clear();
+    for (let index = 0; index < this.wasm.get_shard_count(); index += 1) {
+      if (this.wasm.is_shard_broken(index)) this.brokenShardIndices.add(index);
+    }
     this.paused = true;
     this.awaitingStart = true;
   }

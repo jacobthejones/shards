@@ -987,6 +987,9 @@ export default function Home() {
     };
     worker.onmessage = (message: MessageEvent<SimulationWorkerMessage>) => {
         if (message.data.type === "ready") {
+          shardPathCache.clear();
+          chunkCache.clear();
+          dynamicShardKeys.clear();
           sim.shards = new Map(message.data.shards.map((shard) => [shard.key, {
             ...shard,
             health: 1,

@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
-import { WASM_RUNTIME_VERSION } from "../app/wasm-simulation";
+import { WasmSimulation, WASM_RUNTIME_VERSION } from "../app/wasm-simulation";
+import { SaveStateVersion, type SaveState } from "../app/save-state";
 
 const wasmPath = new URL("../public/simulation.wasm", import.meta.url);
 const INITIAL_BALL_SPEED = 1.4366976021418008;
@@ -507,6 +508,50 @@ test("Germination spawns seeds on independent ball timers", async () => {
   wasm.set_ball_next_seed_at(1, wasm.get_time() + 0.001);
   wasm.step_real_simulation(1);
   assert.ok(wasm.get_ball_next_seed_at(1) > wasm.get_time());
+});
+
+test("loading a save rebuilds render geometry for the saved field", async () => {
+  const wasm = await loadRuntime();
+  const simulation = new (WasmSimulation as unknown as new (runtime: Record<string, (...args: number[]) => number>) => WasmSimulation)(wasm);
+  simulation.reset();
+  const savedFieldSeed = simulation.getStaticShards()[0].fieldSeed + 1;
+  const save: SaveState = {
+    version: SaveStateVersion.V5,
+    savedAt: 0,
+    fieldSeed: savedFieldSeed,
+    randomState: 7,
+    time: 12,
+    score: 34,
+    totalHits: 56,
+    totalBreaks: 7,
+    recentBreakRate: 0.5,
+    paused: true,
+    awaitingStart: true,
+    nextArrowId: 1,
+    nextImpactId: 1,
+    arrows: [{ id: 0, x: 0, y: 0, vx: 1, vy: 0, hue: 188, hitCooldown: 0 }],
+    broken: ["0:0"],
+    shards: [],
+    unlockedTechs: [],
+    seeds: [],
+    ballNextSeedAt: [0],
+  };
+
+  simulation.load(save);
+
+  const staticShards = simulation.getStaticShards();
+  assert.ok(staticShards.length > 5_000);
+  assert.equal(staticShards[0].fieldSeed, savedFieldSeed);
+  assert.equal(wasm.get_field_seed(), savedFieldSeed);
+  for (let shard = 0; shard < 10; shard += 1) {
+    const renderShard = staticShards[shard];
+    assert.equal(renderShard.key, `${wasm.get_shard_gx(shard)}:${wasm.get_shard_gy(shard)}`);
+    assert.deepEqual(renderShard.points, Array.from({ length: wasm.get_shard_point_count(shard) }, (_, point) => [
+      wasm.get_shard_point_x(shard, point),
+      wasm.get_shard_point_y(shard, point),
+    ]));
+  }
+  assert.deepEqual(simulation.getState().broken, ["0:0"]);
 });
 
 test("the C++ runtime emits collision events and advances simulation time", async () => {
